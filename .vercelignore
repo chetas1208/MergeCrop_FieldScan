@@ -1,0 +1,15 @@
+# The Vercel deployment contains only the Nuxt product application and shared TS packages.
+# Vision inference, local state, artifacts, and raw uploads remain on the GPU server.
+apps/vision/
+data/
+outputs/
+uploads/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.safetensors

@@ -1,0 +1,98 @@
+video:
+  sample_fps: 2.0
+  max_frames: 24
+  supported_extensions: [".mp4", ".mov", ".m4v"]
+
+quality:
+  min_sharpness: 0.12
+  max_near_black: 0.35
+  max_saturated: 0.25
+  min_luminance: 20.0
+  max_luminance: 235.0
+  unusable_weight: 0.15
+
+segmentation:
+  # field_cv = real superpixel+cluster analysis (default)
+  # sam2 / sam3 when packages+weights available
+  # heuristic = simple RGB rules (explicit fallback)
+  backend: field_cv
+  n_superpixels: 280
+  n_clusters: 6
+  prompts:
+    field: ["crop field", "farmland", "agricultural field"]
+    crop: ["crop", "corn", "soybean", "vegetation canopy"]
+    bare_soil: ["bare soil", "dirt", "exposed soil"]
+    road: ["dirt road", "farm road", "path", "road"]
+    trees: ["trees", "tree line", "woodland"]
+    water: ["water", "pond", "stream"]
+    infrastructure: ["building", "farm building", "farm equipment"]
+  min_mask_area_frac: 0.005
+  field_union_classes: [CROP, BARE_SOIL, FIELD]
+
+features:
+  # auto → DINOv2 if weights+torch else dense_rgb PCA descriptors
+  dino_backend: auto
+  skip_dino: false
+  tile_size: 64
+  vegetation_exg_threshold: 0.05
+
+grid:
+  rows: 8
+  cols: 8
+  min_field_fraction: 0.25
+
+anomaly:
+  weights:
+    dino: 0.35
+    coverage: 0.25
+    color: 0.20
+    vegetation: 0.12
+    texture: 0.08
+  use_isolation_forest: true
+  isolation_forest_weight: 0.18
+  high_threshold: 0.62
+  medium_threshold: 0.38
+  reason_contribution_min: 0.06
+
+temporal:
+  min_persistent_frames: 3
+  centroid_link_distance: 0.14
+  iou_link_threshold: 0.15
+  shadow_suppress: true
+
+structural:
+  weights:
+    occupancy_deficit: 0.30
+    continuity_evidence: 0.25
+    gap_extent: 0.20
+    fragmentation: 0.15
+    soil_exposure: 0.10
+  edge_exclusion_px: 12
+  row_visibility_min_coherence: 0.12
+
+boundary:
+  min_component_frac: 0.02
+  max_hole_fill_frac: 0.008
+
+registration:
+  max_corners: 500
+  match_ratio: 0.75
+  min_inliers: 12
+  ransac_reproj_threshold: 3.0
+
+visualization:
+  mask_opacity: 0.35
+  zone_opacity: 0.45
+  heatmap_colormap: turbo
+  draw_legend: true
+
+output:
+  write_annotated_video: true
+  write_heatmap: true
+  write_frames: true
+  write_metrics: true
+  jpeg_quality: 85
+
+runtime:
+  device: auto
+  log_level: INFO

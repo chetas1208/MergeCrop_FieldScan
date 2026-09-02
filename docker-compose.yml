@@ -1,0 +1,111 @@
+# Optional local infra. Default path uses SQLite files under data/db/ (no Docker required).
+#
+#   docker compose up -d postgres
+#   export DATABASE_URL=postgresql://cropmerge:cropmerge@127.0.0.1:5432/cropmerge
+#   export VISION_DATABASE_URL=postgresql://cropmerge:cropmerge@127.0.0.1:5432/cropmerge_vision
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cropmerge-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: cropmerge
+      POSTGRES_PASSWORD: cropmerge
+      POSTGRES_DB: cropmerge
+    volumes:
+      - cropmerge_pg:/var/lib/postgresql/data
+      - ./tooling/db/postgres-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cropmerge -d cropmerge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Lightweight admin UI (optional)
+  adminer:
+    image: adminer:4
+    container_name: cropmerge-adminer
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - tools
+
+  # ── CropMerge FieldScan Live (Docker Compose only — see AGENTS.md) ──
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: cropmerge-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NUXT_PUBLIC_VISION_API_URL: ${NUXT_PUBLIC_VISION_API_URL:-http://127.0.0.1:8001}
+      NUXT_VISION_SHARED_SECRET: ${VISION_SHARED_SECRET:?Set VISION_SHARED_SECRET in .env}
+      NUXT_PUBLIC_MEDIAMTX_WHEP_URL: ${NUXT_PUBLIC_MEDIAMTX_WHEP_URL:-http://127.0.0.1:8889}
+    depends_on:
+      - vision
+
+  vision:
+    build:
+      context: .
+      dockerfile: apps/vision/Dockerfile
+    container_name: cropmerge-vision
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      VISION_SHARED_SECRET: ${VISION_SHARED_SECRET:?Set VISION_SHARED_SECRET in .env}
+      VISION_CORS_ORIGINS: ${VISION_CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      MEDIAMTX_RTSP_URL: rtsp://mediamtx:8554/${LIVE_STREAM_PATH:-cropmerge/live}
+      MEDIAMTX_RTMP_URL: rtmp://mediamtx:1935/${LIVE_STREAM_PATH:-cropmerge/live}
+      MEDIAMTX_HOST: mediamtx
+      MEDIAMTX_RTSP_PORT: "8554"
+      MQTT_BROKER_URL: mqtt://mosquitto:1883
+      MQTT_BROKER_HOST: mosquitto
+      MQTT_BROKER_PORT: "1883"
+      LIVE_STREAM_PATH: ${LIVE_STREAM_PATH:-cropmerge/live}
+      LIVE_WHEP_PUBLIC_URL: ${NUXT_PUBLIC_MEDIAMTX_WHEP_URL:-http://127.0.0.1:8889}
+      LIVE_SAMPLE_FPS_DEFAULT: ${LIVE_SAMPLE_FPS_DEFAULT:-2}
+      LIVE_SAMPLE_FPS_MAX: ${LIVE_SAMPLE_FPS_MAX:-5}
+    volumes:
+      - ./outputs:/app/outputs
+      - ./data:/app/data
+    depends_on:
+      - mediamtx
+      - mosquitto
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/vision/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.20.1
+    container_name: cropmerge-mediamtx
+    restart: unless-stopped
+    ports:
+      - "1935:1935" # RTMP ingest (Pilot 2 / simulated publisher)
+      - "8554:8554" # RTSP read (vision CV worker)
+      - "8889:8889" # WebRTC/WHEP read (browser)
+    volumes:
+      - ./deploy/mediamtx/mediamtx.yml:/mediamtx.yml:ro
+
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    container_name: cropmerge-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883" # DJI Cloud API MQTT telemetry ingest
+    volumes:
+      - ./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+volumes:
+  cropmerge_pg:

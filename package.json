@@ -1,0 +1,24 @@
+{
+  "name": "cropmerge-field-triage",
+  "private": true,
+  "version": "0.1.0",
+  "description": "CropMerge Field Triage — RGB drone video → field segmentation → visual anomaly mapping → farmer review",
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @cropmerge/web dev",
+    "dev:web": "pnpm --filter @cropmerge/web dev",
+    "build": "pnpm -r --filter './packages/*' build && pnpm --filter @cropmerge/web build",
+    "build:web": "pnpm --filter @cropmerge/web build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "vision:install": "cd apps/vision && pip install -e '.[dev]'",
+    "vision:serve": "cd apps/vision && python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8001",
+    "vision:test": "cd apps/vision && python -m pytest tests/ -v",
+    "vision:demo": "cd apps/vision && python scripts/generate_demo_video.py && python scripts/analyze_video.py --input samples/synthetic_field.mp4 --output ../../outputs/demo --segmentation-backend heuristic",
+    "demo": "pnpm vision:demo"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "run_id": "d4b7789904cc",
+  "stage_latency_sec": {
+    "video_decode": 0.8179765439126641,
+    "quality_analysis": 0.28746769903227687,
+    "segmentation": 730.6089856710751,
+    "registration": 0.7740410880651325,
+    "feature_anomaly": 468.6278224310372,
+    "temporal_consensus": 0.005787253845483065,
+    "rendering": 4.75031782919541,
+    "total_runtime": 1208.7976864289958
+  },
+  "frames_sampled": 20,
+  "frames_usable": 20,
+  "zones": 12,
+  "registration_mean_confidence": 0.9414,
+  "used_fallback": false
+}

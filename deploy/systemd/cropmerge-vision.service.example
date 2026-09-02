@@ -1,0 +1,19 @@
+[Unit]
+Description=CropMerge Field Triage Vision API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=923873155
+WorkingDirectory=/home/923873155/CrropMerge\x20Assignment/apps/vision
+EnvironmentFile=/etc/cropmerge/vision.env
+ExecStart=/home/923873155/CrropMerge\x20Assignment/apps/vision/.venv/bin/python -m uvicorn api.main:app --host 127.0.0.1 --port 8001 --workers 1
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

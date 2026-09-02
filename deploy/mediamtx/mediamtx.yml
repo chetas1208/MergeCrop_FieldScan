@@ -1,0 +1,26 @@
+# MediaMTX config for CropMerge FieldScan Live Drone mode.
+# Local dev only — settings below (open WebRTC origin, no auth) are not
+# meant for exposure beyond a trusted local network.
+#
+# RTMP ingest : rtmp://<host>:1935/cropmerge/live   (Pilot 2 or the
+#               simulated publisher, apps/vision/scripts/publish_simulated_live.py)
+# RTSP read   : rtsp://<host>:8554/cropmerge/live   (apps/vision RTSP CV worker)
+# WebRTC/WHEP : http://<host>:8889/cropmerge/live/whep (browser)
+
+logLevel: info
+
+rtmp: yes
+rtmpAddress: :1935
+
+rtsp: yes
+rtspAddress: :8554
+protocols: [tcp]
+
+webrtc: yes
+webrtcAddress: :8889
+# Dev-only: tighten before exposing this beyond a trusted local network.
+webrtcAllowOrigin: "*"
+
+paths:
+  cropmerge/live:
+    source: publisher

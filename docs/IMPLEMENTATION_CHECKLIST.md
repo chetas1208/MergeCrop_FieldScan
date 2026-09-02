@@ -1,0 +1,22 @@
+# Implementation checklist
+
+- [x] Monorepo: pnpm + apps/web + apps/vision + packages/*
+- [x] Shared TS types + Zod validation package
+- [x] Video decode/metadata (.mp4/.mov/.m4v), sample FPS
+- [x] Frame quality (sharpness, exposure, motion weight)
+- [x] Segmenter interface + heuristic backend + SAM3 adapter stub
+- [x] Class labels + overlap resolution + field mask
+- [x] Registration (ORB/RANSAC homography, fail-closed)
+- [x] RGB ExG/color/texture (not NDVI)
+- [x] Embedding interface + heuristic + DINOv3 adapter stub
+- [x] Spatial grid anomaly + configurable fusion weights
+- [x] Explainability reasons + review priority
+- [x] Temporal consensus → persistent zones
+- [x] Annotated video, heatmap, JSON, metrics
+- [x] FastAPI internal vision API
+- [x] Nuxt product API + UI + disclaimer language
+- [x] CLI analyze_video / analyze_image / generate_demo
+- [x] pytest suite (non-model)
+- [x] Docs: README, ARCHITECTURE, TECHNICAL_SUMMARY, DATA_SOURCES, LIMITATIONS
+- [x] Geo hooks (future only)
+- [x] No silent fake SAM/DINO claims (`usedFallback`)

@@ -1,0 +1,105 @@
+# ── Dependencies ─────────────────────────────────────
+node_modules/
+.pnpm-store/
+apps/vision/.venv/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# ── Secrets / local env ──────────────────────────────
+.env
+.env.*
+!.env.example
+deploy/local/
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# ── Build / cache ────────────────────────────────────
+.nuxt/
+.output/
+.turbo/
+*.tsbuildinfo
+.cache/
+.pytest_cache/
+.mypy_cache/
+.runc_cache/
+.ruff_cache/
+coverage/
+htmlcov/
+.coverage
+*.log
+logs/
+
+# ── Model weights (download separately) ──────────────
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.safetensors
+apps/vision/models/**
+!apps/vision/models/.gitkeep
+!apps/vision/models/*.example
+checkpoints/
+third_party/**
+
+# ── Runtime data / DBs ───────────────────────────────
+outputs/**
+!outputs/.gitkeep
+apps/vision/outputs/**
+!apps/vision/outputs/.gitkeep
+data/db/**
+!data/db/.gitkeep
+!data/db/*.example
+data/uploads/**
+!data/uploads/.gitkeep
+data/raw/**
+!data/raw/.gitkeep
+apps/web/.data/
+uploads/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# ── Media: ignore bulk, keep demo samples ────────────
+*.mp4
+*.mov
+*.m4v
+*.webm
+*.avi
+# Keep curated demo samples in-repo
+!apps/vision/samples/**/*.mp4
+!apps/vision/samples/**/*.jpg
+!apps/vision/samples/**/*.jpeg
+!apps/vision/samples/**/*.png
+!apps/web/public/samples/**/*
+!apps/web/public/demo/**/*
+!apps/web/public/demo/**/*
+# Drop bulky unedited source downloads under samples/real/
+apps/vision/samples/real/source_*
+
+# ── IDE / OS ─────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+.claude/
+.grok/
+.cursor/
+
+# ── Temp ─────────────────────────────────────────────
+tmp/
+*.tmp
+*.bak
+.vercel/
+.env.local

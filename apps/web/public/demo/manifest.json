@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "description": "Pre-computed CropMerge analyses served from GitHub/Vercel static assets for offline demo mode.",
+  "cases": [
+    {
+      "id": "drone-field-video",
+      "title": "Real drone field video",
+      "subtitle": "Estonia \u00b7 10s \u00b7 RGB flyover",
+      "kind": "video",
+      "inputUrl": "/samples/real_field_drone.mp4",
+      "inputFilename": "real_field_drone.mp4",
+      "inputMime": "video/mp4",
+      "jobUrl": "/demo/drone-field-video/job.json",
+      "zoneCount": 12,
+      "cropCoverage": 0.2504,
+      "runId": "d4b7789904cc"
+    },
+    {
+      "id": "soybean-field-image",
+      "title": "Real soybean field image",
+      "subtitle": "South Dakota \u00b7 USDA RGB still",
+      "kind": "image",
+      "inputUrl": "/samples/real_soybean_field.jpg",
+      "inputFilename": "real_soybean_field.jpg",
+      "inputMime": "image/jpeg",
+      "jobUrl": "/demo/soybean-field-image/job.json",
+      "zoneCount": 4,
+      "cropCoverage": 0.4316,
+      "runId": "c9cf2ebba109"
+    }
+  ]
+}

@@ -1,0 +1,325 @@
+{
+  "schemaVersion": "1.0",
+  "runId": "c9cf2ebba109",
+  "createdAt": "2026-08-27T07:54:09.278426+00:00",
+  "disclaimer": "CropMerge Field Triage analyzes visual patterns in RGB imagery. Flagged regions represent differences from surrounding field appearance and are intended for human review. They are not diagnoses of crop disease, nutrient status, irrigation failure, or plant health.",
+  "source": {
+    "filename": "bf735e29244d4d44ae7db6acc3b602bc.jpg",
+    "durationSec": 0.0,
+    "width": 1400,
+    "height": 902,
+    "fps": 1.0,
+    "frameCount": 1,
+    "codec": "image",
+    "orientation": null,
+    "createdAt": null,
+    "gps": null
+  },
+  "analysis": {
+    "framesSampled": 8,
+    "framesUsable": 8,
+    "sampleFps": 2.0,
+    "segmentationBackend": "sam2_weights_present_heuristic_runtime",
+    "dinoBackend": "dinov2",
+    "usedFallback": true,
+    "device": "cuda",
+    "stageLatencySec": {
+      "video_decode": 0.027,
+      "quality_analysis": 0.1008,
+      "segmentation": 3.0132,
+      "registration": 0.8526,
+      "feature_anomaly": 34.4092,
+      "temporal_consensus": 0.0012,
+      "rendering": 2.451,
+      "total_runtime": 42.9308
+    },
+    "totalRuntimeSec": 42.9308
+  },
+  "field": {
+    "detected": true,
+    "meanCropCoverage": 0.4316,
+    "meanBareSoil": 0.0327,
+    "roadPathDetected": false,
+    "treeVegetationDetected": false,
+    "waterDetected": false,
+    "infrastructureDetected": true,
+    "meanFieldFraction": 0.4241
+  },
+  "inspectionZones": [
+    {
+      "id": "ZONE_001",
+      "reviewPriority": "high",
+      "anomalyScore": 0.519,
+      "persistenceScore": 1.0,
+      "firstSeenMs": 0.0,
+      "lastSeenMs": 3500.0,
+      "firstSeenSec": 0.0,
+      "lastSeenSec": 3.5,
+      "framesSeen": 9,
+      "relativeLocation": "northwest",
+      "centroidNorm": {
+        "x": 0.3264,
+        "y": 0.1868
+      },
+      "bboxNorm": {
+        "x": 0.25,
+        "y": 0.1242,
+        "w": 0.125,
+        "h": 0.1253
+      },
+      "evidence": {
+        "cropCoverageDelta": -0.0983,
+        "colorDifference": 0.0503,
+        "vegetationDifference": 0.459,
+        "textureDifference": 0.0631,
+        "embeddingDifference": 0.6666,
+        "persistence": 1.0
+      },
+      "reasons": [
+        "Greenness proxy (ExG) is off the field baseline by 0.10 \u2014 visible vegetation signal only, not NDVI",
+        "Patch looks visually unlike the dominant field texture (embedding distance 0.67)",
+        "Multivariate fingerprint is an outlier \u2014 several cues stack up in the same grid cell",
+        "Not a one-frame glitch \u2014 pattern held for ~100% of sampled timestamps as the drone moved"
+      ],
+      "recommendation": "Fly the northwest sector on your next pass \u2014 review score 69% (65% visual oddity + 35% stickiness flagged in 9 frames). Drop to tree-top height or walk the rows before you blame crop stress."
+    },
+    {
+      "id": "ZONE_002",
+      "reviewPriority": "high",
+      "anomalyScore": 0.4774,
+      "persistenceScore": 1.0,
+      "firstSeenMs": 0.0,
+      "lastSeenMs": 3500.0,
+      "firstSeenSec": 0.0,
+      "lastSeenSec": 3.5,
+      "framesSeen": 8,
+      "relativeLocation": "southwest",
+      "centroidNorm": {
+        "x": 0.0625,
+        "y": 0.8121
+      },
+      "bboxNorm": {
+        "x": 0.0,
+        "y": 0.7494,
+        "w": 0.125,
+        "h": 0.1253
+      },
+      "evidence": {
+        "cropCoverageDelta": 0.4551,
+        "colorDifference": 0.204,
+        "vegetationDifference": 0.5795,
+        "textureDifference": 0.1422,
+        "embeddingDifference": 0.2863,
+        "persistence": 1.0
+      },
+      "reasons": [
+        "Greener / denser strip than the surrounding rows (+46% vs baseline; 86% crop cover in this cell)",
+        "RGB color profile diverges from the field median (Lab distance 0.20 \u2014 think lighter/darker or shifted hue, not a diagnosis)",
+        "Greenness proxy (ExG) is off the field baseline by 0.12 \u2014 visible vegetation signal only, not NDVI",
+        "Multivariate fingerprint is an outlier \u2014 several cues stack up in the same grid cell",
+        "Not a one-frame glitch \u2014 pattern held for ~100% of sampled timestamps as the drone moved"
+      ],
+      "recommendation": "Fly the southwest sector on your next pass \u2014 review score 66% (65% visual oddity + 35% stickiness flagged in 8 frames). Drop to tree-top height or walk the rows before you blame crop stress."
+    },
+    {
+      "id": "ZONE_003",
+      "reviewPriority": "high",
+      "anomalyScore": 0.4759,
+      "persistenceScore": 1.0,
+      "firstSeenMs": 0.0,
+      "lastSeenMs": 3500.0,
+      "firstSeenSec": 0.0,
+      "lastSeenSec": 3.5,
+      "framesSeen": 8,
+      "relativeLocation": "north",
+      "centroidNorm": {
+        "x": 0.4531,
+        "y": 0.1868
+      },
+      "bboxNorm": {
+        "x": 0.375,
+        "y": 0.1242,
+        "w": 0.125,
+        "h": 0.1253
+      },
+      "evidence": {
+        "cropCoverageDelta": -0.0452,
+        "colorDifference": 0.07,
+        "vegetationDifference": 0.5438,
+        "textureDifference": 0.0851,
+        "embeddingDifference": 0.5399,
+        "persistence": 1.0
+      },
+      "reasons": [
+        "Crop cover sits off the field median (36% here vs typical patch mix)",
+        "Greenness proxy (ExG) is off the field baseline by 0.00 \u2014 visible vegetation signal only, not NDVI",
+        "Patch looks visually unlike the dominant field texture (embedding distance 0.54)",
+        "Multivariate fingerprint is an outlier \u2014 several cues stack up in the same grid cell",
+        "Not a one-frame glitch \u2014 pattern held for ~100% of sampled timestamps as the drone moved"
+      ],
+      "recommendation": "Fly the north sector on your next pass \u2014 review score 66% (65% visual oddity + 35% stickiness flagged in 8 frames). Drop to tree-top height or walk the rows before you blame crop stress."
+    },
+    {
+      "id": "ZONE_004",
+      "reviewPriority": "medium",
+      "anomalyScore": 0.3577,
+      "persistenceScore": 0.8661,
+      "firstSeenMs": 500.0,
+      "lastSeenMs": 3500.0,
+      "firstSeenSec": 0.5,
+      "lastSeenSec": 3.5,
+      "framesSeen": 7,
+      "relativeLocation": "north",
+      "centroidNorm": {
+        "x": 0.5625,
+        "y": 0.1868
+      },
+      "bboxNorm": {
+        "x": 0.5,
+        "y": 0.1242,
+        "w": 0.125,
+        "h": 0.1253
+      },
+      "evidence": {
+        "cropCoverageDelta": -0.0403,
+        "colorDifference": 0.0607,
+        "vegetationDifference": 0.561,
+        "textureDifference": 0.0639,
+        "embeddingDifference": 0.5452,
+        "persistence": 0.8661
+      },
+      "reasons": [
+        "Crop cover sits off the field median (37% here vs typical patch mix)",
+        "Patch looks visually unlike the dominant field texture (embedding distance 0.55)",
+        "Not a one-frame glitch \u2014 pattern held for ~87% of sampled timestamps as the drone moved"
+      ],
+      "recommendation": "Bookmark the north area for the next flight (review score 54%). If it still pops on a repeat pass, worth boots-on-the-ground photos \u2014 could be drainage, compaction, or just a hybrid line."
+    }
+  ],
+  "frameQuality": [
+    {
+      "frameIndex": 0,
+      "timestampSec": 0.0,
+      "sharpness": 1.0,
+      "exposureScore": 0.9631,
+      "meanLuminance": 126.0,
+      "nearBlackFraction": 0.0242,
+      "saturatedFraction": 0.0068,
+      "usable": true,
+      "qualityWeight": 1.0,
+      "warnings": []
+    },
+    {
+      "frameIndex": 1,
+      "timestampSec": 0.5,
+      "sharpness": 1.0,
+      "exposureScore": 0.9631,
+      "meanLuminance": 126.0,
+      "nearBlackFraction": 0.0242,
+      "saturatedFraction": 0.0068,
+      "usable": true,
+      "qualityWeight": 1.0,
+      "warnings": []
+    },
+    {
+      "frameIndex": 2,
+      "timestampSec": 1.0,
+      "sharpness": 1.0,
+      "exposureScore": 0.9631,
+      "meanLuminance": 126.0,
+      "nearBlackFraction": 0.0242,
+      "saturatedFraction": 0.0068,
+      "usable": true,
+      "qualityWeight": 1.0,
+      "warnings": []
+    },
+    {
+      "frameIndex": 3,
+      "timestampSec": 1.5,
+      "sharpness": 1.0,
+      "exposureScore": 0.9631,
+      "meanLuminance": 126.0,
+      "nearBlackFraction": 0.0242,
+      "saturatedFraction": 0.0068,
+      "usable": true,
+      "qualityWeight": 1.0,
+      "warnings": []
+    },
+    {
+      "frameIndex": 4,
+      "timestampSec": 2.0,
+      "sharpness": 1.0,
+      "exposureScore": 0.9631,
+      "meanLuminance": 126.0,
+      "nearBlackFraction": 0.0242,
+      "saturatedFraction": 0.0068,
+      "usable": true,
+      "qualityWeight": 1.0,
+      "warnings": []
+    },
+    {
+      "frameIndex": 5,
+      "timestampSec": 2.5,
+      "sharpness": 1.0,
+      "exposureScore": 0.9631,
+      "meanLuminance": 126.0,
+      "nearBlackFraction": 0.0242,
+      "saturatedFraction": 0.0068,
+      "usable": true,
+      "qualityWeight": 1.0,
+      "warnings": []
+    },
+    {
+      "frameIndex": 6,
+      "timestampSec": 3.0,
+      "sharpness": 1.0,
+      "exposureScore": 0.9631,
+      "meanLuminance": 126.0,
+      "nearBlackFraction": 0.0242,
+      "saturatedFraction": 0.0068,
+      "usable": true,
+      "qualityWeight": 1.0,
+      "warnings": []
+    },
+    {
+      "frameIndex": 7,
+      "timestampSec": 3.5,
+      "sharpness": 1.0,
+      "exposureScore": 0.9631,
+      "meanLuminance": 126.0,
+      "nearBlackFraction": 0.0242,
+      "saturatedFraction": 0.0068,
+      "usable": true,
+      "qualityWeight": 1.0,
+      "warnings": []
+    }
+  ],
+  "classCoverage": {
+    "FIELD": 0.0016,
+    "CROP": 0.4316,
+    "BARE_SOIL": 0.0327,
+    "ROAD_PATH": 0.0051,
+    "TREE_VEGETATION": 0.0061,
+    "WATER": 0.0033,
+    "INFRASTRUCTURE": 0.0083,
+    "UNKNOWN": 0.5114
+  },
+  "limitations": [
+    "RGB-only visual analysis",
+    "No agronomic diagnosis inferred",
+    "Image-relative field map (not georeferenced unless GPS metadata present)",
+    "Exploratory visual anomaly scores are not calibrated probabilities",
+    "Do not manufacture NDVI from RGB",
+    "Segmentation backend 'sam2' used fallback/heuristic path \u2014 not claimed as SAM 3.1 output"
+  ],
+  "artifacts": {
+    "resultsJson": "results.json",
+    "annotatedVideo": "annotated_video.mp4",
+    "heatmapPng": "heatmap.png",
+    "metricsJson": "metrics.json",
+    "framesDir": "frames",
+    "overlaysDir": "overlays"
+  },
+  "georeferenced": false,
+  "mapLabel": "Annotated fly-through \u2014 boxes mark zones that stuck around frame-to-frame"
+}
