@@ -174,6 +174,23 @@ export interface ArtifactPaths {
   overlaysDir?: string | null
 }
 
+/** Deterministic, template-generated synthesis of a completed run — every
+ * sentence traces to a real number elsewhere in the report. Never LLM-authored
+ * (the optional local-LLM layer may polish `headline`/zone `llmSummary` text
+ * but must not invent evidence beyond what's already computed here). */
+export interface FieldAnalysisSummary {
+  scheduledObservations: number
+  usableObservations: number
+  limitedObservations: number
+  highPriorityCount: number
+  mediumPriorityCount: number
+  lowPriorityCount: number
+  highestPriorityZoneId?: string | null
+  headline: string
+  keyFindings: string[]
+  limitations: string[]
+}
+
 export interface FieldTriageReport {
   schemaVersion: '1.0'
   runId: string
@@ -189,6 +206,7 @@ export interface FieldTriageReport {
   artifacts: ArtifactPaths
   georeferenced: false
   mapLabel: string
+  summary?: FieldAnalysisSummary | null
 }
 
 export interface AnalysisJob {

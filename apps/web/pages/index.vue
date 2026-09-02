@@ -467,10 +467,12 @@ async function analyze() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         uploadId,
-        sampleFps: 2,
+        sampleFps: 1,
         // Images are repeated across a few synthetic timestamps so temporal
         // persistence (min ~3 frames) can still form inspection zones.
-        maxFrames: isImageUpload.value ? 3 : 24,
+        // Videos omit maxFrames so the backend covers the whole clip at 1 FPS
+        // (up to its own safety ceiling) instead of truncating early.
+        maxFrames: isImageUpload.value ? 3 : undefined,
         skipDino: false,
         segmentationBackend: health.value?.vision?.segmentationBackend || 'heuristic',
         dinoBackend: health.value?.vision?.dinoBackend || 'heuristic',
@@ -871,6 +873,9 @@ const mediaSrc = computed(() => {
       <div v-if="fieldBrief" class="card flight-brief">
         <h2 class="section-label">Summary</h2>
         <p class="flight-brief-text">{{ fieldBrief }}</p>
+        <ul v-if="report.summary?.keyFindings?.length" class="key-findings">
+          <li v-for="(finding, i) in report.summary.keyFindings" :key="i">{{ finding }}</li>
+        </ul>
       </div>
 
       <!-- Overview stats -->

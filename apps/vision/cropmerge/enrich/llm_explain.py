@@ -24,6 +24,34 @@ SYSTEM_PROMPT = (
     "not present in the input. Plain, direct language."
 )
 
+# Anti-hallucination gate: applied to every generated string before it's
+# shown anywhere. If any of these appear, the output is discarded and the
+# caller falls back to the deterministic `reasons` text — this product makes
+# no diagnosis, so generated text claiming one is always wrong, never a
+# judgment call.
+FORBIDDEN_PHRASES = [
+    "disease",
+    "nitrogen deficien",
+    "nutrient deficien",
+    "water stress",
+    "drought stress",
+    "yield loss",
+    "unhealthy crop",
+    "unhealthy plant",
+    "planting failure",
+    "pest damage",
+    "infection",
+    "fungal",
+]
+
+
+def _contains_forbidden_claim(text: str) -> str | None:
+    lowered = text.lower()
+    for phrase in FORBIDDEN_PHRASES:
+        if phrase in lowered:
+            return phrase
+    return None
+
 
 def llm_enrichment_enabled() -> bool:
     return os.environ.get(ENABLED_ENV, "false").strip().lower() == "true"
@@ -130,7 +158,13 @@ def summarize_zone(
             )
         generated = output[0][inputs["input_ids"].shape[1]:]
         result = _tokenizer.decode(generated, skip_special_tokens=True).strip()
-        return result or None
+        if not result:
+            return None
+        hit = _contains_forbidden_claim(result)
+        if hit:
+            log.warning("LLM enrichment output rejected (contains %r) — falling back to deterministic text", hit)
+            return None
+        return result
     except Exception as e:
         log.warning("LLM enrichment generation failed (%s)", e)
         return None

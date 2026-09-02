@@ -1,6 +1,7 @@
 import numpy as np
+import pytest
 
-from cropmerge.features.rgb_indices import color_stats, excess_green, lab_distance, vegetation_mask
+from cropmerge.features.rgb_indices import color_stats, excess_green, lab_distance, vari, vegetation_mask
 from cropmerge.features.texture import texture_features
 
 
@@ -17,6 +18,19 @@ def test_vegetation_mask():
     green[:] = (30, 200, 30)
     m = vegetation_mask(excess_green(green), 0.05)
     assert float(np.mean(m)) > 0.9
+
+
+def test_vari_higher_on_green():
+    # Gitelson et al. 2002: VARI = (G-R)/(G+R-B) — hand-calculable case.
+    green = np.zeros((16, 16, 3), dtype=np.uint8)
+    green[:] = (20, 180, 20)  # BGR -> R=20,G=180,B=20 -> (180-20)/(180+20-20)=0.888...
+    brown = np.zeros((16, 16, 3), dtype=np.uint8)
+    brown[:] = (40, 80, 140)  # BGR -> R=140,G=80,B=40 -> (80-140)/(80+140-40)=-0.333...
+    v_green = float(np.mean(vari(green)))
+    v_brown = float(np.mean(vari(brown)))
+    assert v_green > v_brown
+    assert v_green == pytest.approx(0.8888, rel=1e-3)
+    assert v_brown == pytest.approx(-0.3333, rel=1e-3)
 
 
 def test_color_stats_and_lab():

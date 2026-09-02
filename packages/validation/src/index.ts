@@ -168,6 +168,19 @@ export const artifactPathsSchema = z.object({
   overlaysDir: z.string().nullish(),
 })
 
+export const fieldAnalysisSummarySchema = z.object({
+  scheduledObservations: z.number().int(),
+  usableObservations: z.number().int(),
+  limitedObservations: z.number().int(),
+  highPriorityCount: z.number().int(),
+  mediumPriorityCount: z.number().int(),
+  lowPriorityCount: z.number().int(),
+  highestPriorityZoneId: z.string().nullish(),
+  headline: z.string(),
+  keyFindings: z.array(z.string()),
+  limitations: z.array(z.string()),
+})
+
 export const fieldTriageReportSchema = z.object({
   schemaVersion: z.literal('1.0'),
   runId: z.string(),
@@ -183,6 +196,7 @@ export const fieldTriageReportSchema = z.object({
   artifacts: artifactPathsSchema,
   georeferenced: z.literal(false),
   mapLabel: z.string(),
+  summary: fieldAnalysisSummarySchema.nullish(),
 })
 
 export const createAnalysisRequestSchema = z.object({

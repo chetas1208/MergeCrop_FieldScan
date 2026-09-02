@@ -10,22 +10,17 @@ import os
 
 import pytest
 
-from cropmerge.enrich.llm_explain import summarize_zone
+from cropmerge.enrich.llm_explain import FORBIDDEN_PHRASES, _contains_forbidden_claim, summarize_zone
 
-FORBIDDEN_PHRASES = [
-    "disease",
-    "nitrogen deficien",
-    "nutrient deficien",
-    "water stress",
-    "drought stress",
-    "yield loss",
-    "unhealthy crop",
-    "unhealthy plant",
-    "planting failure",
-    "pest damage",
-    "infection",
-    "fungal",
-]
+
+def test_contains_forbidden_claim_detects_known_phrases():
+    assert _contains_forbidden_claim("This looks like early signs of disease.") == "disease"
+    assert _contains_forbidden_claim("Consistent with nitrogen deficiency here.") == "nitrogen deficien"
+
+
+def test_contains_forbidden_claim_allows_clean_text():
+    assert _contains_forbidden_claim("Crop coverage is lower here than nearby field structure.") is None
+
 
 FIXTURES = [
     {
@@ -58,7 +53,7 @@ FIXTURES = [
     },
 ]
 
-pytestmark = pytest.mark.skipif(
+_needs_real_model = pytest.mark.skipif(
     os.environ.get("CROP_MERGE_LLM_ENRICHMENT", "").lower() != "true"
     or not os.environ.get("CROP_MERGE_LLM_MODEL_PATH"),
     reason="Real-model safety check — set CROP_MERGE_LLM_ENRICHMENT=true and "
@@ -66,10 +61,14 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@_needs_real_model
 @pytest.mark.parametrize("fixture", FIXTURES, ids=[f["primary_signal_label"] for f in FIXTURES])
 def test_no_forbidden_agronomic_claims(fixture):
+    # None is an acceptable outcome here: it means the gate in summarize_zone
+    # itself caught a forbidden claim and correctly discarded it. The only
+    # failure is forbidden text actually reaching the caller.
     result = summarize_zone(**fixture)
-    assert result is not None, "Expected the real model to produce output for this fixture"
-    lowered = result.lower()
-    hits = [phrase for phrase in FORBIDDEN_PHRASES if phrase in lowered]
-    assert not hits, f"Forbidden claim(s) {hits} in generated text: {result!r}"
+    if result is None:
+        return
+    hits = [phrase for phrase in FORBIDDEN_PHRASES if phrase in result.lower()]
+    assert not hits, f"Forbidden claim(s) {hits} leaked past the gate: {result!r}"

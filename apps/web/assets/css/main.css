@@ -974,6 +974,17 @@ select {
   color: var(--text);
 }
 
+.key-findings {
+  margin: 0.75rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--text-soft);
+}
+.key-findings li {
+  margin-bottom: 0.2rem;
+}
+
 .warn-banner {
   border: 1px solid color-mix(in srgb, var(--medium) 35%, var(--border));
   background: color-mix(in srgb, var(--medium) 12%, var(--bg-card));

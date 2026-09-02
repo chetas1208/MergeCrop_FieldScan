@@ -16,6 +16,7 @@ from cropmerge.anomaly.temporal import aggregate_zones
 from cropmerge.config import load_config
 from cropmerge.features.dinov3 import create_embedder
 from cropmerge.pipeline.frame_analysis import analyze_single_frame
+from cropmerge.pipeline.summary import build_field_analysis_summary
 from cropmerge.pipeline.schemas import (
     AnalysisSummary,
     ArtifactPaths,
@@ -384,6 +385,7 @@ class FieldTriageProcessor:
             georeferenced=False,
             map_label="Analysis field boundary — vision estimate, not a property or surveyed boundary",
         )
+        report.summary = build_field_analysis_summary(report)
 
         camel = report.to_camel_dict()
         with open(results_path, "w", encoding="utf-8") as f:

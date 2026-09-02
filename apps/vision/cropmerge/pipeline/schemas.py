@@ -218,6 +218,40 @@ def zone_to_camel_dict(z: InspectionZone) -> dict[str, Any]:
     }
 
 
+class FieldAnalysisSummary(BaseModel):
+    """Deterministic, template-generated synthesis of a completed run — every
+    sentence here is built from already-computed report fields, never from an
+    LLM. See cropmerge/pipeline/summary.py for the builder. The optional local
+    LLM (cropmerge/enrich/) may polish `headline`/`key_findings` prose but
+    must never invent evidence not present in this object.
+    """
+
+    scheduled_observations: int
+    usable_observations: int
+    limited_observations: int
+    high_priority_count: int
+    medium_priority_count: int
+    low_priority_count: int
+    highest_priority_zone_id: str | None = None
+    headline: str
+    key_findings: list[str]
+    limitations: list[str]
+
+    def to_camel_dict(self) -> dict[str, Any]:
+        return {
+            "scheduledObservations": self.scheduled_observations,
+            "usableObservations": self.usable_observations,
+            "limitedObservations": self.limited_observations,
+            "highPriorityCount": self.high_priority_count,
+            "mediumPriorityCount": self.medium_priority_count,
+            "lowPriorityCount": self.low_priority_count,
+            "highestPriorityZoneId": self.highest_priority_zone_id,
+            "headline": self.headline,
+            "keyFindings": self.key_findings,
+            "limitations": self.limitations,
+        }
+
+
 class FieldTriageReport(BaseModel):
     schema_version: str = "1.0"
     run_id: str
@@ -233,6 +267,7 @@ class FieldTriageReport(BaseModel):
     artifacts: ArtifactPaths
     georeferenced: bool = False
     map_label: str = "Image-relative field map — not georeferenced"
+    summary: FieldAnalysisSummary | None = None
 
     def to_camel_dict(self) -> dict[str, Any]:
         """Emit TS-contract keys (camelCase) for Nuxt."""
@@ -327,4 +362,5 @@ class FieldTriageReport(BaseModel):
             },
             "georeferenced": False,
             "mapLabel": self.map_label,
+            "summary": self.summary.to_camel_dict() if self.summary else None,
         }

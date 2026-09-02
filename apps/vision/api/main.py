@@ -205,10 +205,21 @@ class UploadInitRequest(BaseModel):
     content_type: str | None = Field(default=None, max_length=255)
 
 
+DEFAULT_SAMPLE_FPS = 1.0
+# Safety ceiling, not a target: covers a full ~30 min drone clip at 1 FPS
+# (matches the product's own "analyze every scheduled second" requirement)
+# without letting a pathologically long upload run the single-worker GPU
+# executor forever.
+MAX_FRAMES_CEILING = 1800
+
+
 class AnalysisRequest(BaseModel):
     upload_id: str = Field(alias="uploadId")
-    sample_fps: float = Field(default=2.0, alias="sampleFps", gt=0, le=30)
-    max_frames: int = Field(default=120, alias="maxFrames", gt=0, le=600)
+    sample_fps: float = Field(default=DEFAULT_SAMPLE_FPS, alias="sampleFps", gt=0, le=30)
+    # None (the default) means: cover the whole video at sample_fps, up to
+    # MAX_FRAMES_CEILING — see JobManager._run(). An explicit value still
+    # acts as a hard cap for callers that want one.
+    max_frames: int | None = Field(default=None, alias="maxFrames", gt=0, le=MAX_FRAMES_CEILING)
     skip_dino: bool = Field(default=False, alias="skipDino")
     segmentation_backend: str = Field(default="heuristic", alias="segmentationBackend", min_length=1, max_length=64)
     dino_backend: str = Field(default="heuristic", alias="dinoBackend", min_length=1, max_length=64)
@@ -622,7 +633,10 @@ class JobManager:
                 upload.completed_path,
                 self.cfg.output_dir,
                 sample_fps=float(options["sample_fps"]),
-                max_frames=int(options["max_frames"]),
+                # None means "cover the whole video" — sample_frames() already
+                # stops at end-of-stream naturally; the ceiling only guards
+                # against pathologically long uploads.
+                max_frames=int(options["max_frames"]) if options["max_frames"] is not None else MAX_FRAMES_CEILING,
                 skip_dino=bool(options["skip_dino"]),
                 segmentation_backend=str(options["segmentation_backend"]),
                 dino_backend=str(options["dino_backend"]),

@@ -105,3 +105,4 @@ tmp/
 .env.local
 .vercel
 .env*
+.vercel-fieldscan1-link-backup*

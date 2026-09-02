@@ -151,7 +151,11 @@ def aggregate_zones(
             continue
 
         total_obs = max(usable_frames, len(timestamps))
-        persistent_obs = len(tr.timestamps)
+        # Defensive clamp: a track must never claim more observations than
+        # frames existed to observe it in. Seen rarely in practice (not yet
+        # root-caused on a real video — see Decisions.md); never surface an
+        # impossible "11 of 10" claim regardless of cause.
+        persistent_obs = min(len(tr.timestamps), total_obs)
         persistence = float(
             np.clip(
                 np.sum(w_arr) / max(sum(quality_weights), 1e-3),
