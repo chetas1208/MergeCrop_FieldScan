@@ -5,21 +5,12 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 ENV_FILE="${VISION_ENV_FILE:-$ROOT/deploy/local/vision.env}"
 LOG="$ROOT/deploy/local/vision.log"
 PIDFILE="$ROOT/deploy/local/vision.pid"
-PORT="${VISION_PORT:-8001}"
 
 mkdir -p "$ROOT/deploy/local"
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "Missing $ENV_FILE" >&2
   exit 1
 fi
-
-# Stop prior instance on our port only
-if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-  kill "$(cat "$PIDFILE")" 2>/dev/null || true
-  sleep 1
-fi
-pkill -f "uvicorn api.main:app --host 127.0.0.1 --port ${PORT}" 2>/dev/null || true
-sleep 1
 
 set -a
 # shellcheck disable=SC1090
@@ -30,6 +21,18 @@ if [[ -f "$ROOT/apps/vision/models/weights.env" ]]; then
   source "$ROOT/apps/vision/models/weights.env"
 fi
 set +a
+
+# PORT must be resolved AFTER sourcing ENV_FILE, so VISION_PORT set there
+# (not just in the calling shell's environment) actually takes effect.
+PORT="${VISION_PORT:-8001}"
+
+# Stop prior instance on our port only
+if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+  kill "$(cat "$PIDFILE")" 2>/dev/null || true
+  sleep 1
+fi
+pkill -f "uvicorn api.main:app --host 127.0.0.1 --port ${PORT}" 2>/dev/null || true
+sleep 1
 
 cd "$ROOT/apps/vision"
 nohup .venv/bin/python -m uvicorn api.main:app \

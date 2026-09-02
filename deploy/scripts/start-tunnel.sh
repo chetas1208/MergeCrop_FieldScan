@@ -7,8 +7,17 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$ROOT/deploy/scripts/tunnel-lock.sh"
 LOG="$ROOT/deploy/local/cloudflared.log"
 TUNNEL_URL_FILE="$ROOT/deploy/local/tunnel.url"
-PORT="${VISION_PORT:-8001}"
 mkdir -p "$ROOT/deploy/local"
+
+# Resolve PORT from deploy/local/vision.env (not just an already-exported
+# VISION_PORT in the calling shell) so this matches whatever start-vision.sh
+# actually bound to.
+VISION_ENV_FILE_FOR_PORT="${VISION_ENV_FILE:-$ROOT/deploy/local/vision.env}"
+if [[ -f "$VISION_ENV_FILE_FOR_PORT" ]]; then
+  # shellcheck disable=SC1090
+  VISION_PORT="$(grep '^VISION_PORT=' "$VISION_ENV_FILE_FOR_PORT" | tail -1 | cut -d= -f2- | tr -d '[:space:]' || true)"
+fi
+PORT="${VISION_PORT:-8001}"
 
 if [[ "${FORCE_TUNNEL_RESTART:-0}" != "1" ]] && tunnel_lock_active; then
   LOCKED_URL="$(grep '^LOCKED_URL=' "$LOCK_FILE" 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true)"

@@ -103,3 +103,5 @@ tmp/
 *.bak
 .vercel/
 .env.local
+.vercel
+.env*
