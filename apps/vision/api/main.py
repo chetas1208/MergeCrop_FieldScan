@@ -251,7 +251,20 @@ class UploadStore:
     def _record_path(self, upload_id: str) -> Path:
         return self._dir(upload_id) / "upload.json"
 
+    def _completed_record_path(self, upload_id: str) -> Path:
+        """Completed-upload metadata lives beside the completed file itself
+        (completed_root/<id>.json), NOT under .incomplete/<id>/ — keeping it
+        there was a real, systematic bug (see docs/); complete()/save_small()
+        delete the .incomplete/<id>/ staging directory once an upload
+        finishes, and any record written back under that path would just
+        recreate the very directory that was just deleted.
+        """
+        return self.completed_root / f"{_valid_upload_id(upload_id)}.json"
+
     def _write_record(self, record: UploadRecord) -> None:
+        """Persist an IN-PROGRESS (status='uploading') record under its
+        .incomplete/<id>/ staging directory. Never called for a completed
+        record — see _write_completed_record()."""
         directory = self._dir(record.id)
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / "upload.json"
@@ -260,8 +273,22 @@ class UploadStore:
             temp = Path(handle.name)
         temp.replace(target)
 
+    def _write_completed_record(self, record: UploadRecord) -> None:
+        """Persist a COMPLETED record under completed_root, and remove its
+        now-superseded .incomplete/<id>/ staging directory (chunk parts for
+        the chunked-upload path, or just the initial 'uploading' record for
+        the small-upload fast path) -- the fix for the directory-leak bug."""
+        target = self._completed_record_path(record.id)
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=self.completed_root, delete=False) as handle:
+            handle.write(record.model_dump_json())
+            temp = Path(handle.name)
+        temp.replace(target)
+        shutil.rmtree(self._dir(record.id), ignore_errors=True)
+
     def get(self, upload_id: str) -> UploadRecord:
-        path = self._record_path(upload_id)
+        path = self._completed_record_path(upload_id)
+        if not path.is_file():
+            path = self._record_path(upload_id)
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Upload not found")
         try:
@@ -326,11 +353,10 @@ class UploadStore:
                         shutil.copyfileobj(source, handle, length=1024 * 1024)
                 temp = Path(handle.name)
             temp.replace(target)
-            shutil.rmtree(directory, ignore_errors=True)
             record.status = "completed"
             record.completed_path = str(target)
             record = _register_upload_blob(record)
-            self._write_record(record)
+            self._write_completed_record(record)
             return record
 
     def save_small(self, file: UploadFile) -> UploadRecord:
@@ -363,7 +389,7 @@ class UploadStore:
         record.completed_path = str(target)
         record = _register_upload_blob(record)
         with self._lock:
-            self._write_record(record)
+            self._write_completed_record(record)
         return record
 
     def cancel(self, upload_id: str) -> None:
