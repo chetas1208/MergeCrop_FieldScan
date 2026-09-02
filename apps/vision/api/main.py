@@ -33,6 +33,9 @@ from cropmerge.enrich.llm_explain import unload as unload_llm
 from cropmerge.live.router import create_live_router
 from cropmerge.pipeline.processor import FieldTriageProcessor
 from cropmerge.segmentation.sam3 import sam3_available
+from cropmerge.storage.blob_store import BlobStore
+from cropmerge.storage.manifest import Manifest
+from cropmerge.storage.policies import StorageClass
 
 try:
     from cropmerge.features.dinov2 import dinov2_available
@@ -198,6 +201,7 @@ class UploadRecord(BaseModel):
     status: str
     created_at: str
     completed_path: str | None = None
+    blob_sha256: str | None = None
 
 
 class UploadInitRequest(BaseModel):
@@ -322,6 +326,7 @@ class UploadStore:
             shutil.rmtree(directory, ignore_errors=True)
             record.status = "completed"
             record.completed_path = str(target)
+            record = _register_upload_blob(record)
             self._write_record(record)
             return record
 
@@ -353,6 +358,7 @@ class UploadStore:
         record.total_chunks = 1
         record.status = "completed"
         record.completed_path = str(target)
+        record = _register_upload_blob(record)
         with self._lock:
             self._write_record(record)
         return record
@@ -709,6 +715,45 @@ def _manager() -> JobManager:
         _job_manager = JobManager(cfg)
         _job_manager_key = key
     return _job_manager
+
+
+_storage_manifest: Manifest | None = None
+_storage_manifest_key: Path | None = None
+
+
+def _storage() -> Manifest:
+    """Lazily-initialized, process-wide content-addressed storage manifest
+    (see cropmerge/storage/). Rooted under settings().data_dir so it lives
+    alongside the existing uploads/db directories. Registration failures
+    here must never fail an upload — see _register_upload_blob()."""
+    global _storage_manifest, _storage_manifest_key
+    cfg = settings()
+    key = cfg.data_dir
+    if _storage_manifest is None or _storage_manifest_key != key:
+        blob_store = BlobStore(cfg.data_dir / "blobs")
+        _storage_manifest = Manifest(cfg.data_dir / "db" / "storage-manifest.sqlite", blob_store=blob_store)
+        _storage_manifest_key = key
+    return _storage_manifest
+
+
+def _register_upload_blob(record: "UploadRecord") -> "UploadRecord":
+    """Hash the just-completed upload into the content-addressed store and
+    record a logical reference for it. Purely additive bookkeeping for this
+    integration phase: record.completed_path keeps pointing at the original
+    plain file (unchanged read path for analysis/materialization) — this
+    only gives real dedup-bytes visibility (see docs/STORAGE_BASELINE.md)
+    and a provenance hash. A failure here must never fail the upload
+    itself, so any exception is logged and swallowed.
+    """
+    if not record.completed_path:
+        return record
+    try:
+        blob_ref = _storage().blob_store.put(Path(record.completed_path))
+        _storage().add(f"upload:{record.id}", blob_ref, storage_class=StorageClass.SCIENTIFIC_SOURCE.value)
+        record.blob_sha256 = blob_ref.sha256
+    except Exception:
+        log.exception("Storage blob registration failed for upload=%s (upload itself still succeeded)", record.id)
+    return record
 
 
 def _torch_ok() -> bool:

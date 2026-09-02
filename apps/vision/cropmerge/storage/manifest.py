@@ -21,6 +21,7 @@ blob that no longer exists.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,7 +56,18 @@ class Manifest:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.blob_store = blob_store
-        self._conn = sqlite3.connect(str(self.db_path), isolation_level=None)
+        # A process-wide Manifest instance (e.g. api/main.py's _storage()
+        # singleton) is called from whichever thread happens to handle a
+        # given request — FastAPI runs sync path operations in a
+        # threadpool, not necessarily the thread the Manifest was
+        # constructed in. sqlite3 connections default to
+        # check_same_thread=True and raise on exactly that cross-thread
+        # use, so we disable that check and serialize all access ourselves
+        # with _lock instead (sqlite3's own C-level locking handles the
+        # rest; we only need to prevent two Python threads from interleaving
+        # a read-then-write sequence, e.g. add()'s old-blob-refcount check).
+        self._conn = sqlite3.connect(str(self.db_path), isolation_level=None, check_same_thread=False)
+        self._lock = threading.Lock()
         self._conn.row_factory = sqlite3.Row
         # WAL + synchronous=FULL: durable commits, and readers never see a
         # torn/partial write — the manifest is metadata for scientific
@@ -92,7 +104,7 @@ class Manifest:
         """
         created_at = datetime.now(timezone.utc).isoformat()
         old_sha256: str | None = None
-        with self._conn:
+        with self._lock, self._conn:
             row = self._conn.execute(
                 "SELECT sha256 FROM objects WHERE logical_id = ?", (logical_id,)
             ).fetchone()
@@ -130,7 +142,7 @@ class Manifest:
         deleted (only if a `blob_store` was provided to this Manifest) —
         never before the mapping deletion is durably committed.
         """
-        with self._conn:
+        with self._lock, self._conn:
             row = self._conn.execute(
                 "SELECT sha256 FROM objects WHERE logical_id = ?", (logical_id,)
             ).fetchone()
@@ -149,27 +161,31 @@ class Manifest:
     # -- reads --------------------------------------------------------------
 
     def get(self, logical_id: str) -> ManifestEntry | None:
-        row = self._conn.execute(
-            "SELECT * FROM objects WHERE logical_id = ?", (logical_id,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM objects WHERE logical_id = ?", (logical_id,)
+            ).fetchone()
         if row is None:
             return None
         return _row_to_entry(row)
 
     def ref_count(self, sha256: str) -> int:
-        row = self._conn.execute(
-            "SELECT COUNT(*) AS n FROM objects WHERE sha256 = ?", (sha256,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM objects WHERE sha256 = ?", (sha256,)
+            ).fetchone()
         return int(row["n"])
 
     def list_by_blob(self, sha256: str) -> list[ManifestEntry]:
-        rows = self._conn.execute(
-            "SELECT * FROM objects WHERE sha256 = ? ORDER BY created_at", (sha256,)
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM objects WHERE sha256 = ? ORDER BY created_at", (sha256,)
+            ).fetchall()
         return [_row_to_entry(r) for r in rows]
 
     def list_all(self) -> list[ManifestEntry]:
-        rows = self._conn.execute("SELECT * FROM objects ORDER BY created_at").fetchall()
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM objects ORDER BY created_at").fetchall()
         return [_row_to_entry(r) for r in rows]
 
 
