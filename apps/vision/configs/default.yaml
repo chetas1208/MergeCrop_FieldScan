@@ -53,6 +53,16 @@ anomaly:
   high_threshold: 0.62
   medium_threshold: 0.38
   reason_contribution_min: 0.06
+  # Blend a spatially-local (neighborhood) baseline into appearance-anomaly
+  # z-scores alongside the whole-field one. 0.0 = old pure-global behavior;
+  # 1.0 = pure-local. Added 2026-09-02 after a real multi-treatment-zone
+  # research plot photo showed the pure-global baseline flagging cells
+  # inconsistently across otherwise visually-uniform regions (see
+  # docs/ANOMALY_LOCAL_BASELINE.md) -- median/MAD across the whole field
+  # can't represent three large, distinct, roughly-equal treatment zones
+  # simultaneously.
+  local_baseline_weight: 0.5
+  local_baseline_radius: 2
 
 temporal:
   min_persistent_frames: 3

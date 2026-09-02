@@ -33,6 +33,50 @@ def _robust_z(values: np.ndarray, valid: np.ndarray) -> np.ndarray:
     return out
 
 
+def _local_robust_z(
+    values: np.ndarray,
+    valid: np.ndarray,
+    rows_idx: np.ndarray,
+    cols_idx: np.ndarray,
+    radius: int,
+    min_neighbors: int = 4,
+) -> np.ndarray:
+    """Median/MAD z-score computed against each cell's own spatial
+    neighborhood (Chebyshev radius in grid cells), not the whole-field
+    baseline. _robust_z()'s single global median/MAD implicitly assumes the
+    field is otherwise uniform with only small localized anomalies -- that
+    assumption breaks down for a field with large, deliberate, roughly
+    equal-sized treatment zones (e.g. a research plot split into thirds):
+    the global median lands somewhere between the zones, so cells in EVERY
+    zone read as "different from the blended average," and which specific
+    cells cross a flagging threshold becomes sensitive to grid-cell noise
+    rather than genuine within-zone anomalies -- cells that look identical
+    to their immediate neighbors can end up on opposite sides of the
+    threshold. Comparing each cell to its local neighborhood instead means
+    a cell surrounded by visually similar cells is not flagged just because
+    it differs from a different part of the field.
+
+    Cells with fewer than `min_neighbors` valid neighbors fall back to 0
+    (no local signal) rather than a noisy estimate from too few samples --
+    the global z-score (blended in by the caller) still covers those.
+    """
+    out = np.zeros_like(values, dtype=np.float64)
+    if not np.any(valid):
+        return out
+    valid_positions = np.flatnonzero(valid)
+    for i in valid_positions:
+        r0, c0 = rows_idx[i], cols_idx[i]
+        neighbor_mask = valid & (np.abs(rows_idx - r0) <= radius) & (np.abs(cols_idx - c0) <= radius)
+        neighbor_mask[i] = False
+        if int(np.sum(neighbor_mask)) < min_neighbors:
+            continue
+        local_vals = values[neighbor_mask]
+        med = float(np.median(local_vals))
+        mad = float(np.median(np.abs(local_vals - med))) + 1e-6
+        out[i] = abs(values[i] - med) / (1.4826 * mad)
+    return out
+
+
 def _to_unit(z: np.ndarray, valid: np.ndarray, clip: float = 4.0) -> np.ndarray:
     """Map robust z to [0,1] via clipped scale + within-frame percentile norm."""
     x = np.clip(z / clip, 0.0, 1.0)
@@ -68,9 +112,18 @@ def score_frame(
     w_tex = float(weights.get("texture", 0.05))
     use_iforest = bool(acfg.get("use_isolation_forest", True))
     iforest_weight = float(acfg.get("isolation_forest_weight", 0.20))
+    # See _local_robust_z()'s docstring: blends in a spatially-local
+    # baseline alongside the whole-field one so a cell isn't flagged just
+    # for differing from a DIFFERENT part of a multi-zone field (e.g. a
+    # research plot split into large treatment strips). 0.0 reproduces the
+    # old pure-global behavior exactly; 1.0 would be pure-local.
+    local_baseline_weight = float(acfg.get("local_baseline_weight", 0.5))
+    local_baseline_radius = int(acfg.get("local_baseline_radius", 2))
 
     h, w = bgr.shape[:2]
     cells = build_grid(h, w, rows, cols)
+    rows_idx = np.array([c.row for c in cells], dtype=np.int32)
+    cols_idx = np.array([c.col for c in cells], dtype=np.int32)
     exg = excess_green(bgr)
     veg = vegetation_mask(exg, exg_thr)
 
@@ -170,12 +223,21 @@ def score_frame(
             )
         )
 
-    # Robust z-scores (not naive min-max alone)
-    cov_u = _to_unit(_robust_z(cov_raw, valid_mask), valid_mask)
-    col_u = _to_unit(_robust_z(col_raw, valid_mask), valid_mask)
-    veg_u = _to_unit(_robust_z(veg_raw, valid_mask), valid_mask)
-    tex_u = _to_unit(_robust_z(tex_raw, valid_mask), valid_mask)
-    emb_u = _to_unit(_robust_z(emb_raw, valid_mask), valid_mask)
+    # Robust z-scores (not naive min-max alone), blending a whole-field
+    # baseline with a spatially-local one -- see _local_robust_z()'s
+    # docstring for why the local component matters.
+    def _blended_z(raw: np.ndarray) -> np.ndarray:
+        global_z = _robust_z(raw, valid_mask)
+        if local_baseline_weight <= 0.0:
+            return global_z
+        local_z = _local_robust_z(raw, valid_mask, rows_idx, cols_idx, local_baseline_radius)
+        return (1.0 - local_baseline_weight) * global_z + local_baseline_weight * local_z
+
+    cov_u = _to_unit(_blended_z(cov_raw), valid_mask)
+    col_u = _to_unit(_blended_z(col_raw), valid_mask)
+    veg_u = _to_unit(_blended_z(veg_raw), valid_mask)
+    tex_u = _to_unit(_blended_z(tex_raw), valid_mask)
+    emb_u = _to_unit(_blended_z(emb_raw), valid_mask)
 
     iforest_u = np.zeros(n, dtype=np.float64)
     X = np.asarray(feat_matrix, dtype=np.float64)
