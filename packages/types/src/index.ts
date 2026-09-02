@@ -241,6 +241,8 @@ export interface FieldTriageReport {
   sourceSha256?: string | null
   storagePolicyVersion: string
   farmTechVersion: string
+  analysisVersion: string
+  configVersion?: string | null
 }
 
 export interface AnalysisJob {

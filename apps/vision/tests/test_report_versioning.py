@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from cropmerge.pipeline.schemas import (
+    ANALYSIS_VERSION,
     FARMTECH_VERSION,
     STORAGE_POLICY_VERSION,
     AnalysisSummary,
@@ -52,3 +53,14 @@ def test_report_source_sha256_round_trips_through_camel_dict():
     report = _minimal_report()
     report.source_sha256 = "a" * 64  # mutated post-construction, mirroring api/main.py's JobManager
     assert report.to_camel_dict()["sourceSha256"] == "a" * 64
+
+
+def test_report_analysis_version_and_config_version():
+    report = _minimal_report()
+    assert report.analysis_version == ANALYSIS_VERSION == "analysis-v1"
+    assert report.config_version is None
+
+    report.config_version = "deadbeef12345678"
+    camel = report.to_camel_dict()
+    assert camel["analysisVersion"] == "analysis-v1"
+    assert camel["configVersion"] == "deadbeef12345678"

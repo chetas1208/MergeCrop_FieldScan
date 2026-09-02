@@ -32,7 +32,8 @@ from cropmerge.enrich.llm_explain import llm_enrichment_enabled, summarize_zone
 from cropmerge.enrich.llm_explain import unload as unload_llm
 from cropmerge.live.router import create_live_router
 from cropmerge.pipeline.processor import FieldTriageProcessor
-from cropmerge.pipeline.schemas import FieldTriageReport
+from cropmerge.pipeline.schemas import ANALYSIS_VERSION, FieldTriageReport
+from cropmerge.storage.analysis_cache import AnalysisCache, compute_cache_key, config_content_hash
 from cropmerge.segmentation.sam3 import sam3_available
 from cropmerge.storage.blob_store import BlobStore
 from cropmerge.storage.manifest import Manifest
@@ -583,6 +584,7 @@ class JobManager:
         self.cfg = cfg
         self.uploads = UploadStore(cfg)
         self.jobs = JobStore(cfg)
+        self.analysis_cache = AnalysisCache(cfg.data_dir / "db" / "analysis-cache.sqlite")
         # The CV pipeline is GPU-heavy; this POC intentionally runs one job at a time.
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="cropmerge-vision")
 
@@ -638,31 +640,48 @@ class JobManager:
                 raise RuntimeError("Completed upload is unavailable")
             self.jobs.update(job_id, status="processing", progress=0.1, stage="processing", message="Running vision pipeline")
             options = job["options"]
-            input_path = _materialize_upload_source(upload)
-            report_model = FieldTriageProcessor(load_config()).process(
-                input_path,
-                self.cfg.output_dir,
-                sample_fps=float(options["sample_fps"]),
-                # None means "cover the whole video" — sample_frames() already
-                # stops at end-of-stream naturally; the ceiling only guards
-                # against pathologically long uploads.
-                max_frames=int(options["max_frames"]) if options["max_frames"] is not None else MAX_FRAMES_CEILING,
-                skip_dino=bool(options["skip_dino"]),
-                segmentation_backend=str(options["segmentation_backend"]),
-                dino_backend=str(options["dino_backend"]),
-                run_id=job_id,
-            )
-            # Provenance: the upload's CAS hash (see _register_upload_blob())
-            # travels onto the result so a result stays forensically traceable
-            # to its exact source bytes even as storage/compression policy
-            # evolves later.
-            report_model.source_sha256 = upload.blob_sha256
-            report = report_model.to_camel_dict()
-            _release_gpu_cache()
+            cfg = load_config()
+
+            cache_hit = self._try_analysis_cache_hit(upload, options, cfg)
+            if cache_hit is not None:
+                report = cache_hit
+            else:
+                input_path = _materialize_upload_source(upload)
+                report_model = FieldTriageProcessor(cfg).process(
+                    input_path,
+                    self.cfg.output_dir,
+                    sample_fps=float(options["sample_fps"]),
+                    # None means "cover the whole video" — sample_frames() already
+                    # stops at end-of-stream naturally; the ceiling only guards
+                    # against pathologically long uploads.
+                    max_frames=int(options["max_frames"]) if options["max_frames"] is not None else MAX_FRAMES_CEILING,
+                    skip_dino=bool(options["skip_dino"]),
+                    segmentation_backend=str(options["segmentation_backend"]),
+                    dino_backend=str(options["dino_backend"]),
+                    run_id=job_id,
+                )
+                # Provenance: the upload's CAS hash (see _register_upload_blob())
+                # travels onto the result so a result stays forensically traceable
+                # to its exact source bytes even as storage/compression policy
+                # evolves later.
+                report_model.source_sha256 = upload.blob_sha256
+                report_model.config_version = config_content_hash(cfg)
+                report = report_model.to_camel_dict()
+                _release_gpu_cache()
+                self._maybe_store_analysis_cache_entry(upload, options, cfg, job_id)
+
             self.jobs.update(job_id, status="rendering", progress=0.95, stage="rendering", message="Finalizing artifacts")
-            safe_report = _public_report(report)
-            _safe_artifact_path(job_id, "results.json").write_text(json.dumps(safe_report, indent=2), encoding="utf-8")
-            _register_run_artifacts_in_cas(job_id, report_model)
+            # A cache hit's report keeps its ORIGINAL runId on purpose (see
+            # _try_analysis_cache_hit) so artifact URLs resolve to the
+            # already-existing files rather than duplicating them — this
+            # job never owns its own output_dir/<job_id>/ directory in that
+            # case, so it must not write into it or re-run LLM enrichment
+            # against it (which would try to write there too).
+            owns_own_artifacts = report.get("runId") == job_id
+            if owns_own_artifacts:
+                safe_report = _public_report(report)
+                _safe_artifact_path(job_id, "results.json").write_text(json.dumps(safe_report, indent=2), encoding="utf-8")
+                _register_run_artifacts_in_cas(job_id, report_model)
             self.jobs.update(
                 job_id,
                 status="completed",
@@ -676,13 +695,73 @@ class JobManager:
             # patches richer descriptions in afterward (frontend already
             # polls job status, so no extra wiring needed) rather than
             # delaying "completed" behind an LLM load/generate.
-            if llm_enrichment_enabled():
+            if owns_own_artifacts and llm_enrichment_enabled():
                 threading.Thread(
                     target=self._enrich_after_completion, args=(job_id, report), daemon=True,
                     name=f"cropmerge-enrich-{job_id}",
                 ).start()
         except Exception as exc:
             self._fail_job(job_id, exc)
+
+    def _analysis_cache_key(self, upload: "UploadRecord", options: dict[str, Any], cfg: dict) -> str | None:
+        """None means "not cacheable" (e.g. the upload was never CAS-registered)
+        -- never a cache miss with a fabricated key."""
+        if not upload.blob_sha256:
+            return None
+        return compute_cache_key(
+            source_sha256=upload.blob_sha256,
+            cfg=cfg,
+            sample_fps=float(options["sample_fps"]),
+            max_frames=int(options["max_frames"]) if options["max_frames"] is not None else MAX_FRAMES_CEILING,
+            skip_dino=bool(options["skip_dino"]),
+            segmentation_backend=str(options["segmentation_backend"]),
+            dino_backend=str(options["dino_backend"]),
+            analysis_version=ANALYSIS_VERSION,
+        )
+
+    def _try_analysis_cache_hit(
+        self, upload: "UploadRecord", options: dict[str, Any], cfg: dict
+    ) -> dict[str, Any] | None:
+        """Phase 17: skip re-running the heavy pipeline when an identical
+        source has already been analyzed under an identical configuration.
+        Gated off by default (CROPMERGE_ANALYSIS_CACHE_ENABLED) -- a wrong
+        hit would silently serve a stale result, unlike the other additive
+        storage features in this campaign. Returns the reused report dict
+        (with its ORIGINAL runId intentionally preserved, not job_id — see
+        _run()'s owns_own_artifacts guard) or None on any miss/failure.
+        Never raises: caching must never be why a real analysis fails.
+        """
+        if str(os.environ.get("CROPMERGE_ANALYSIS_CACHE_ENABLED", "")).lower() not in ("1", "true", "yes"):
+            return None
+        try:
+            cache_key = self._analysis_cache_key(upload, options, cfg)
+            if cache_key is None:
+                return None
+            entry = self.analysis_cache.get(cache_key)
+            if entry is None:
+                return None
+            cached_job = self.jobs.get(entry.run_id)
+            if not cached_job or cached_job["status"] != "completed" or not cached_job["report"]:
+                return None
+            if not _safe_artifact_path(entry.run_id, "results.json").is_file():
+                return None  # cached job's artifacts were removed/never wrote — do not trust the DB row alone
+            log.info("Analysis cache HIT: reusing run=%s for a new request", entry.run_id)
+            return json.loads(json.dumps(cached_job["report"]))  # deep copy — never share a mutable dict
+        except Exception:
+            log.exception("Analysis cache lookup failed (non-fatal, running the pipeline normally)")
+            return None
+
+    def _maybe_store_analysis_cache_entry(
+        self, upload: "UploadRecord", options: dict[str, Any], cfg: dict, job_id: str
+    ) -> None:
+        if str(os.environ.get("CROPMERGE_ANALYSIS_CACHE_ENABLED", "")).lower() not in ("1", "true", "yes"):
+            return
+        try:
+            cache_key = self._analysis_cache_key(upload, options, cfg)
+            if cache_key is not None:
+                self.analysis_cache.put(cache_key, job_id)
+        except Exception:
+            log.exception("Analysis cache write failed for job=%s (non-fatal, job itself succeeded)", job_id)
 
     def _enrich_after_completion(self, job_id: str, report: dict[str, Any]) -> None:
         """Runs on a background thread (GPU1) after the job is already

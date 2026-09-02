@@ -12,6 +12,13 @@ from pydantic import BaseModel, Field
 # subsystem's actual behavior changes, not on every unrelated edit.
 STORAGE_POLICY_VERSION = "fieldscan-storage-v1"
 FARMTECH_VERSION = "farmtech-v1"
+# Bump manually when processor.py's algorithm changes in a way not already
+# captured by a configs/*.yaml value (e.g. a fusion-formula bugfix) --
+# cropmerge/storage/analysis_cache.py combines this with a hash of the
+# actual loaded config content, so config-only changes invalidate the
+# result cache automatically without relying on someone remembering to
+# bump a version string for those.
+ANALYSIS_VERSION = "analysis-v1"
 
 
 class ReviewPriority(str, Enum):
@@ -352,6 +359,8 @@ class FieldTriageReport(BaseModel):
     source_sha256: str | None = None
     storage_policy_version: str = STORAGE_POLICY_VERSION
     farm_tech_version: str = FARMTECH_VERSION
+    analysis_version: str = ANALYSIS_VERSION
+    config_version: str | None = None
 
     def to_camel_dict(self) -> dict[str, Any]:
         """Emit TS-contract keys (camelCase) for Nuxt."""
@@ -363,6 +372,8 @@ class FieldTriageReport(BaseModel):
             "sourceSha256": self.source_sha256,
             "storagePolicyVersion": self.storage_policy_version,
             "farmTechVersion": self.farm_tech_version,
+            "analysisVersion": self.analysis_version,
+            "configVersion": self.config_version,
             "source": {
                 "filename": self.source.filename,
                 "path": self.source.path,

@@ -233,6 +233,8 @@ export const fieldTriageReportSchema = z.object({
   sourceSha256: z.string().nullish(),
   storagePolicyVersion: z.string(),
   farmTechVersion: z.string(),
+  analysisVersion: z.string(),
+  configVersion: z.string().nullish(),
 })
 
 export const createAnalysisRequestSchema = z.object({
