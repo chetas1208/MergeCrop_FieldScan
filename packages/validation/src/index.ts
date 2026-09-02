@@ -230,6 +230,9 @@ export const fieldTriageReportSchema = z.object({
   georeferenced: z.literal(false),
   mapLabel: z.string(),
   summary: fieldAnalysisSummarySchema.nullish(),
+  sourceSha256: z.string().nullish(),
+  storagePolicyVersion: z.string(),
+  farmTechVersion: z.string(),
 })
 
 export const createAnalysisRequestSchema = z.object({

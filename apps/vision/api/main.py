@@ -636,7 +636,7 @@ class JobManager:
                 raise RuntimeError("Completed upload is unavailable")
             self.jobs.update(job_id, status="processing", progress=0.1, stage="processing", message="Running vision pipeline")
             options = job["options"]
-            report = FieldTriageProcessor(load_config()).process(
+            report_model = FieldTriageProcessor(load_config()).process(
                 upload.completed_path,
                 self.cfg.output_dir,
                 sample_fps=float(options["sample_fps"]),
@@ -648,7 +648,13 @@ class JobManager:
                 segmentation_backend=str(options["segmentation_backend"]),
                 dino_backend=str(options["dino_backend"]),
                 run_id=job_id,
-            ).to_camel_dict()
+            )
+            # Provenance: the upload's CAS hash (see _register_upload_blob())
+            # travels onto the result so a result stays forensically traceable
+            # to its exact source bytes even as storage/compression policy
+            # evolves later.
+            report_model.source_sha256 = upload.blob_sha256
+            report = report_model.to_camel_dict()
             _release_gpu_cache()
             self.jobs.update(job_id, status="rendering", progress=0.95, stage="rendering", message="Finalizing artifacts")
             safe_report = _public_report(report)
@@ -736,6 +742,13 @@ def _storage() -> Manifest:
     return _storage_manifest
 
 
+_JPEG_SUFFIXES = {".jpg", ".jpeg"}
+
+
+def _jxl_min_savings_ratio() -> float:
+    return float(os.environ.get("CROPMERGE_JXL_MIN_SAVINGS_RATIO", "0.05"))
+
+
 def _register_upload_blob(record: "UploadRecord") -> "UploadRecord":
     """Hash the just-completed upload into the content-addressed store and
     record a logical reference for it. Purely additive bookkeeping for this
@@ -744,6 +757,17 @@ def _register_upload_blob(record: "UploadRecord") -> "UploadRecord":
     only gives real dedup-bytes visibility (see docs/STORAGE_BASELINE.md)
     and a provenance hash. A failure here must never fail the upload
     itself, so any exception is logged and swallowed.
+
+    For JPEG uploads, also attempts a verified reversible JPEG XL archive
+    (see cropmerge/storage/jxl_archive.py) as an ADDITIONAL, separately
+    content-addressed blob — never a replacement for the original file on
+    disk. This stays additive-only in this integration round: source
+    replacement (deleting the JPEG once a verified reconstructible JXL
+    exists) is deliberately deferred, per the storage campaign's own
+    "lossy/destructive source replacement stays off until benchmarked"
+    default — reversible archival is lossless and verified, but the actual
+    deletion step still deserves its own dedicated review of every code
+    path that reads completed_path directly.
     """
     if not record.completed_path:
         return record
@@ -753,7 +777,46 @@ def _register_upload_blob(record: "UploadRecord") -> "UploadRecord":
         record.blob_sha256 = blob_ref.sha256
     except Exception:
         log.exception("Storage blob registration failed for upload=%s (upload itself still succeeded)", record.id)
+        return record
+
+    if record.suffix.lower() in _JPEG_SUFFIXES:
+        _try_archive_jpeg_reversible(record)
     return record
+
+
+def _try_archive_jpeg_reversible(record: "UploadRecord") -> None:
+    from cropmerge.storage.jxl_archive import archive_jpeg_reversible, jxl_available
+
+    if not jxl_available():
+        return
+    jxl_tmp_path: Path | None = None
+    try:
+        jxl_tmp_dir = settings().data_dir / "tmp" / "jxl-archive"
+        jxl_tmp_dir.mkdir(parents=True, exist_ok=True)
+        jxl_tmp_path = jxl_tmp_dir / f"{record.id}.jxl"
+        result = archive_jpeg_reversible(Path(record.completed_path), jxl_tmp_path)
+        if not result.verified:
+            log.info("JXL archival skipped for upload=%s: %s", record.id, result.reason)
+            return
+        if result.savings_ratio < _jxl_min_savings_ratio():
+            log.info(
+                "JXL archival rejected for upload=%s: savings %.1f%% below threshold",
+                record.id, result.savings_ratio * 100,
+            )
+            return
+        jxl_blob_ref = _storage().blob_store.put(jxl_tmp_path)
+        _storage().add(
+            f"upload:{record.id}:jxl_archive", jxl_blob_ref, storage_class=StorageClass.REVERSIBLE_SOURCE.value,
+        )
+        log.info(
+            "JXL reversible archive verified+stored for upload=%s: %.1f%% savings",
+            record.id, result.savings_ratio * 100,
+        )
+    except Exception:
+        log.exception("JXL archival attempt failed for upload=%s (non-fatal, original JPEG untouched)", record.id)
+    finally:
+        if jxl_tmp_path is not None:
+            jxl_tmp_path.unlink(missing_ok=True)
 
 
 def _torch_ok() -> bool:

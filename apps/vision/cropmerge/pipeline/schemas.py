@@ -5,6 +5,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# Named policy/module versions attached to every completed report so a
+# result stays forensically reconstructible as these subsystems evolve (a
+# result never becomes silently ambiguous about which formula/policy
+# version produced it). Bump the relevant constant whenever that
+# subsystem's actual behavior changes, not on every unrelated edit.
+STORAGE_POLICY_VERSION = "fieldscan-storage-v1"
+FARMTECH_VERSION = "farmtech-v1"
+
 
 class ReviewPriority(str, Enum):
     LOW = "low"
@@ -341,6 +349,9 @@ class FieldTriageReport(BaseModel):
     georeferenced: bool = False
     map_label: str = "Image-relative field map — not georeferenced"
     summary: FieldAnalysisSummary | None = None
+    source_sha256: str | None = None
+    storage_policy_version: str = STORAGE_POLICY_VERSION
+    farm_tech_version: str = FARMTECH_VERSION
 
     def to_camel_dict(self) -> dict[str, Any]:
         """Emit TS-contract keys (camelCase) for Nuxt."""
@@ -349,6 +360,9 @@ class FieldTriageReport(BaseModel):
             "runId": self.run_id,
             "createdAt": self.created_at,
             "disclaimer": self.disclaimer,
+            "sourceSha256": self.source_sha256,
+            "storagePolicyVersion": self.storage_policy_version,
+            "farmTechVersion": self.farm_tech_version,
             "source": {
                 "filename": self.source.filename,
                 "path": self.source.path,

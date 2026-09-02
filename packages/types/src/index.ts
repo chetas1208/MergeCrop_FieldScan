@@ -238,6 +238,9 @@ export interface FieldTriageReport {
   georeferenced: false
   mapLabel: string
   summary?: FieldAnalysisSummary | null
+  sourceSha256?: string | null
+  storagePolicyVersion: string
+  farmTechVersion: string
 }
 
 export interface AnalysisJob {
