@@ -123,6 +123,8 @@ export const farmTechStructureSchema = z.object({
   cropOccupancy: z.number(),
   soilFraction: z.number(),
   fragmentation: z.number(),
+  understoryVegetationFraction: z.number().nullish(),
+  vegetatedSoilFractionOfField: z.number().nullish(),
 })
 
 export const farmTechObservationSchema = z.object({

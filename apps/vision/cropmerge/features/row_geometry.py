@@ -84,6 +84,19 @@ class RowGeometryConfig:
     # (summed) Hough segment length reaches this many pixels of support.
     min_row_support_px: float = 60.0
 
+    # Masks larger than this on their longest side are downsampled (nearest-
+    # neighbor, binary-preserving) before thinning, then support_px/offset_px
+    # are scaled back up to original-image units. Real-world necessity, not
+    # a theoretical one: the Zhang-Suen fallback thinning (used whenever
+    # opencv-contrib's Guo-Hall isn't installed -- see thin_mask()) is
+    # numpy-vectorized but still does up to 400 full-array passes; on an
+    # uncapped ~4000x2250 real drone/overhead photo this measured well over
+    # three minutes, effectively hanging any caller. Row geometry (angle,
+    # coherence, line counts) is a topological/statistical property that
+    # doesn't need native resolution -- an 800px cap keeps it fast and
+    # accurate for this purpose.
+    max_dimension_px: int = 800
+
 
 @dataclass(frozen=True)
 class RowLineCluster:
@@ -398,12 +411,39 @@ def analyze_row_geometry(mask: np.ndarray, cfg: RowGeometryConfig | None = None)
     Pure function: does not read cropmerge.config or touch
     cropmerge/pipeline/processor.py (not wired into the live pipeline yet,
     see module docstring).
+
+    Masks larger than `cfg.max_dimension_px` on their longest side are
+    downsampled before thinning/Hough (see RowGeometryConfig.max_dimension_px
+    for why this matters in practice, not just in theory) -- support_px and
+    offset_px on the returned clusters are scaled back up so callers always
+    see original-image pixel units regardless of internal downsampling.
     """
     cfg = cfg or RowGeometryConfig()
+    scale = 1.0
+    h, w = mask.shape[:2]
+    longest = max(h, w)
+    if longest > cfg.max_dimension_px > 0:
+        scale = cfg.max_dimension_px / longest
+        small_size = (max(1, round(w * scale)), max(1, round(h * scale)))  # cv2.resize wants (w, h)
+        mask = cv2.resize((mask > 0).astype(np.uint8), small_size, interpolation=cv2.INTER_NEAREST)
+
     cleaned = clean_mask(mask, cfg)
     skeleton, thin_method = thin_mask(cleaned)
     lines = hough_row_lines(skeleton, cfg)
     dominant_angle, clusters = cluster_row_lines(lines, cfg)
+
+    if scale != 1.0:
+        inv_scale = 1.0 / scale
+        clusters = [
+            RowLineCluster(
+                angle_deg=c.angle_deg,
+                offset_px=c.offset_px * inv_scale,
+                support_px=c.support_px * inv_scale,
+                line_count=c.line_count,
+            )
+            for c in clusters
+        ]
+
     strong = [c for c in clusters if c.support_px >= cfg.min_row_support_px]
 
     st_angle, st_coherence = structure_tensor_orientation(cleaned.astype(np.float32))

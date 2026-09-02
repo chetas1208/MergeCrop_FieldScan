@@ -24,6 +24,7 @@ import numpy as np
 from cropmerge.features.observability import classify_observability
 from cropmerge.features.rgb_indices import excess_green, vari
 from cropmerge.features.row_geometry import RowGeometryConfig, analyze_row_geometry
+from cropmerge.features.weed_pressure import understory_vegetation_fraction
 from cropmerge.pipeline.schemas import (
     FarmTechObservation,
     FarmTechRowGeometry,
@@ -43,6 +44,7 @@ def compute_farmtech_observation(
     soil_fraction: float,
     occupancy: np.ndarray | None,
     fragmentation_mask: np.ndarray | None,
+    label_map: np.ndarray | None = None,
 ) -> FarmTechObservation | None:
     """Pure, side-effect-free per-frame FarmTech shadow measurement.
 
@@ -69,10 +71,19 @@ def compute_farmtech_observation(
         fragmentation = (
             float(np.mean(fragmentation_mask[field])) if fragmentation_mask is not None else 0.0
         )
+        understory_fraction: float | None = None
+        vegetated_soil_of_field: float | None = None
+        if label_map is not None:
+            weed = understory_vegetation_fraction(bgr, field, label_map)
+            understory_fraction = weed["understoryVegetationFraction"]
+            vegetated_soil_of_field = weed["vegetatedSoilFractionOfField"]
+
         structure = FarmTechStructure(
             crop_occupancy=crop_occupancy,
             soil_fraction=soil_fraction,
             fragmentation=fragmentation,
+            understory_vegetation_fraction=understory_fraction,
+            vegetated_soil_fraction_of_field=vegetated_soil_of_field,
         )
 
         row_geometry: FarmTechRowGeometry | None = None

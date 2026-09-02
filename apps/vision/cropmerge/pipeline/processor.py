@@ -190,6 +190,7 @@ class FieldTriageProcessor:
                 soil_fraction = class_fractions(label).get("BARE_SOIL", 0.0)
                 q.farm_tech = compute_farmtech_observation(
                     fr.bgr, field, seg.crop_mask, soil_fraction, sres.occupancy, sres.fragmentation_mask,
+                    label_map=label,
                 )
         latency["feature_anomaly"] = time.perf_counter() - t
 

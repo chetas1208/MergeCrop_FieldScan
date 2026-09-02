@@ -161,6 +161,13 @@ class FarmTechStructure(BaseModel):
     crop_occupancy: float
     soil_fraction: float
     fragmentation: float
+    # Visible-vegetation-in-soil-area proxy — see
+    # cropmerge/features/weed_pressure.py's module docstring for the hard
+    # physical limitation this respects: vegetation occluded beneath closed
+    # crop canopy is not observable in overhead RGB imagery, so this can
+    # only ever be a "visible weed cover" signal, never a total/hidden one.
+    understory_vegetation_fraction: float | None = None
+    vegetated_soil_fraction_of_field: float | None = None
 
 
 class FarmTechObservation(BaseModel):
@@ -302,6 +309,8 @@ def farm_tech_to_camel_dict(ft: FarmTechObservation | None) -> dict[str, Any] | 
             "cropOccupancy": ft.structure.crop_occupancy,
             "soilFraction": ft.structure.soil_fraction,
             "fragmentation": ft.structure.fragmentation,
+            "understoryVegetationFraction": ft.structure.understory_vegetation_fraction,
+            "vegetatedSoilFractionOfField": ft.structure.vegetated_soil_fraction_of_field,
         },
     }
 

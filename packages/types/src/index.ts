@@ -127,6 +127,11 @@ export interface FarmTechStructure {
   cropOccupancy: number
   soilFraction: number
   fragmentation: number
+  /** Visible vegetation found within soil-classified area (gaps/inter-row) —
+   * NOT a measure of weeds hidden beneath crop canopy, which overhead RGB
+   * imagery cannot see. Null when not computed for this observation. */
+  understoryVegetationFraction?: number | null
+  vegetatedSoilFractionOfField?: number | null
 }
 
 /** Shadow-only per-observation FarmTech evidence — recorded for review, not

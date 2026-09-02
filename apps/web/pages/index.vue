@@ -631,7 +631,7 @@ const mediaSrc = computed(() => {
           <div class="upload-icon" aria-hidden="true">↑</div>
           <h2 class="upload-title">Drop field video or image here</h2>
           <p class="upload-meta">
-            Video .mp4 · .mov · .m4v · Image .jpg · .png · .webp · 2 FPS sample
+            Video .mp4 · .mov · .m4v · Image .jpg · .png · .webp · 1 FPS sample
           </p>
 
           <div v-if="file && !isDemo" class="file-chip" @click.stop>

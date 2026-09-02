@@ -240,3 +240,41 @@ def test_analyze_row_geometry_gap_reduces_hough_support_on_that_row():
     assert r_full.row_line_support_px > 0
     assert r_gapped.row_line_support_px > 0
     assert r_gapped.row_line_support_px <= r_full.row_line_support_px
+
+
+def test_large_mask_is_downsampled_and_stays_fast():
+    """Regression: on a real ~4000x2250 overhead photo's crop mask, the
+    Zhang-Suen fallback thinning (used whenever opencv-contrib's Guo-Hall
+    isn't installed) measured well over three minutes uncapped -- effectively
+    hanging any caller. RowGeometryConfig.max_dimension_px (default 800)
+    downsamples before thinning; this must keep a large mask fast."""
+    import time
+
+    h, w = 2250, 4000
+    mask = np.zeros((h, w), dtype=np.uint8)
+    for x in range(0, w, 80):
+        mask[:, x : x + 15] = 1
+
+    t0 = time.perf_counter()
+    result = analyze_row_geometry(mask, RowGeometryConfig())
+    elapsed = time.perf_counter() - t0
+
+    assert elapsed < 10.0, f"took {elapsed:.1f}s -- downsampling regression"
+    assert result.num_consistent_rows > 0
+
+
+def test_support_px_is_scaled_back_to_original_resolution_units():
+    """A row spanning the full mask height should report support_px close
+    to that original height, not the downsampled internal working size --
+    proving the post-thinning rescale is applied, not just the resize."""
+    h, w = 2000, 3000  # forces downsampling at the default 800px cap
+    mask = np.zeros((h, w), dtype=np.uint8)
+    mask[100 : h - 100, 500:520] = 1  # one long vertical row
+
+    cfg = RowGeometryConfig(min_row_support_px=1.0)
+    result = analyze_row_geometry(mask, cfg)
+
+    # Should be a sizeable fraction of the ORIGINAL height (h-200), not the
+    # downsampled working size (~800px cap) -- a plain pixel count on the
+    # downsampled mask would be an order of magnitude too small here.
+    assert result.row_line_support_px > (h - 200) * 0.5
