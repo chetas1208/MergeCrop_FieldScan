@@ -204,3 +204,60 @@ def test_unit_type_confidence_capped_by_spatial_support_even_with_perfect_agreem
     confidence = unit_type_confidence(one_cell, UnitType.ACTIVE_CROP, ResidueClass.LIVING_VEGETATION)
 
     assert confidence < 1.0  # perfect agreement, but only 1 of 6 minimum cells sampled
+
+
+def _assert_units_are_spatially_contiguous(result) -> None:
+    """Phase 2 (management-unit quality gate): every reported unit must be
+    ONE 4-connected blob of grid cells, never two identical-looking but
+    spatially separate patches merged under the same id. The
+    segment_management_units() union-find only ever unions grid-adjacent
+    cells, so this should already hold by construction -- this is the
+    explicit verification the campaign asked for, not new production code."""
+    grid = result.cell_unit_ids
+    for unit in result.units:
+        cells = [(r, c) for r in range(result.rows) for c in range(result.cols) if grid[r][c] == unit.unit_id]
+        assert cells, f"unit {unit.unit_id} has no cells"
+        seen = {cells[0]}
+        frontier = [cells[0]]
+        while frontier:
+            r, c = frontier.pop()
+            for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nb = (r + dr, c + dc)
+                if nb in set(cells) and nb not in seen:
+                    seen.add(nb)
+                    frontier.append(nb)
+        assert seen == set(cells), (
+            f"unit {unit.unit_id} is NOT spatially contiguous: {len(seen)} of {len(cells)} cells reachable"
+        )
+
+
+def test_three_zone_field_units_are_spatially_contiguous():
+    bgr, field, label = _three_zone_field()
+
+    result = segment_management_units(bgr, field, label, rows=6, cols=6)
+
+    _assert_units_are_spatially_contiguous(result)
+
+
+def test_identical_but_disjoint_regions_are_not_merged_into_one_unit():
+    """Two feature-identical green patches at opposite corners, separated by
+    soil, must NOT collapse into a single management unit just because
+    boundary_cost() between them would be ~0 -- they are never adjacent, so
+    the union-find can never connect them. This is what "spatially
+    contiguous" actually guards against: a naive feature-similarity cluster
+    (ignoring position) would wrongly merge them."""
+    h, w = 240, 240
+    bgr = np.full((h, w, 3), (90, 140, 180), dtype=np.uint8)  # tan soil everywhere
+    bgr[0:40, 0:40] = (30, 170, 30)  # green patch, top-left corner
+    bgr[200:240, 200:240] = (30, 170, 30)  # identical green patch, bottom-right corner
+    field = np.ones((h, w), dtype=bool)
+    label = np.full((h, w), "CROP", dtype=object)
+
+    result = segment_management_units(bgr, field, label, rows=6, cols=6, boundary_threshold=0.15)
+
+    _assert_units_are_spatially_contiguous(result)
+    green_unit_ids = {
+        result.cell_unit_ids[0][0],
+        result.cell_unit_ids[result.rows - 1][result.cols - 1],
+    }
+    assert len(green_unit_ids) == 2, "spatially disjoint identical-looking patches must get different unit ids"
