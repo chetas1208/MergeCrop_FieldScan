@@ -20,14 +20,28 @@ from cropmerge.features.texture import texture_features
 from cropmerge.pipeline.schemas import SemanticClass
 
 
-def _robust_z(values: np.ndarray, valid: np.ndarray) -> np.ndarray:
-    """Median/MAD z-score; invalid → 0. Higher = more unusual."""
+def _robust_z(values: np.ndarray, valid: np.ndarray, min_mad: float = 1e-6) -> np.ndarray:
+    """Median/MAD z-score; invalid → 0. Higher = more unusual.
+
+    `min_mad` is a real, necessary floor, not a numerical-stability nicety
+    (2026-09-02, traced from field feedback "zero findings apparently
+    impossible"): a genuinely uniform field's raw feature values (e.g.
+    lab_distance color differences on the order of 1e-4, from pure sensor
+    noise) can have a computed MAD that is ALSO tiny -- dividing by a
+    near-zero MAD amplifies physically negligible absolute differences into
+    large z-scores. The old bare `+ 1e-6` epsilon only guarded against a
+    literal zero MAD, not a merely-tiny one, so this didn't fully protect
+    against it. Callers should pass a min_mad calibrated to what a
+    MEANINGFUL difference looks like in that feature's own units (see
+    score_frame()'s per-feature values) -- the default (1e-6) preserves
+    exact prior behavior for any other caller of this function.
+    """
     out = np.zeros_like(values, dtype=np.float64)
     if not np.any(valid):
         return out
     v = values[valid]
     med = float(np.median(v))
-    mad = float(np.median(np.abs(v - med))) + 1e-6
+    mad = max(float(np.median(np.abs(v - med))), min_mad)
     z = np.abs(values - med) / (1.4826 * mad)
     out[valid] = z[valid]
     return out
@@ -40,6 +54,7 @@ def _local_robust_z(
     cols_idx: np.ndarray,
     radius: int,
     min_neighbors: int = 4,
+    min_mad: float = 1e-6,
 ) -> np.ndarray:
     """Median/MAD z-score computed against each cell's own spatial
     neighborhood (Chebyshev radius in grid cells), not the whole-field
@@ -72,20 +87,39 @@ def _local_robust_z(
             continue
         local_vals = values[neighbor_mask]
         med = float(np.median(local_vals))
-        mad = float(np.median(np.abs(local_vals - med))) + 1e-6
+        mad = max(float(np.median(np.abs(local_vals - med))), min_mad)
         out[i] = abs(values[i] - med) / (1.4826 * mad)
     return out
 
 
-def _to_unit(z: np.ndarray, valid: np.ndarray, clip: float = 4.0) -> np.ndarray:
-    """Map robust z to [0,1] via clipped scale + within-frame percentile norm."""
+def _to_unit(z: np.ndarray, valid: np.ndarray, clip: float = 4.0, min_z_range: float = 1.0) -> np.ndarray:
+    """Map robust z to [0,1] via clipped scale + within-frame percentile norm.
+
+    Real bug fixed here (2026-09-02, traced from field feedback: "zero
+    findings apparently impossible"): normalize_scores() is a pure min-max
+    rescale -- unless every value is EXACTLY equal, it always stretches
+    whatever range exists to fill [0,1]. That means the relative-ranking
+    blend below always inflates SOME cell toward a high score every single
+    frame, even when the underlying z-scores are all noise-level (e.g.
+    every cell scores z=0.02-0.08 -- genuinely uniform, nothing anomalous)
+    -- there is always a "most different" cell in any grid, and rank
+    normalization can't distinguish "meaningfully different" from "the
+    least identical of several near-identical cells." `min_z_range` gates
+    the relative-ranking blend behind the RAW z-scores actually spanning a
+    meaningful range first; below that, this returns the plain clipped
+    global z-score with no rank inflation, so a genuinely uniform field can
+    score near-zero everywhere and correctly produce zero findings.
+    """
     x = np.clip(z / clip, 0.0, 1.0)
     if np.any(valid):
-        # blend global z-scale with relative ranking among valid cells
-        rel = np.zeros_like(x)
-        vv = x[valid]
-        rel[valid] = normalize_scores(vv)
-        x = 0.55 * x + 0.45 * rel
+        z_valid = z[valid]
+        z_range = float(np.max(z_valid) - np.min(z_valid)) if z_valid.size else 0.0
+        if z_range >= min_z_range:
+            # blend global z-scale with relative ranking among valid cells
+            rel = np.zeros_like(x)
+            vv = x[valid]
+            rel[valid] = normalize_scores(vv)
+            x = 0.55 * x + 0.45 * rel
     x[~valid] = 0.0
     return x
 
@@ -112,6 +146,11 @@ def score_frame(
     w_tex = float(weights.get("texture", 0.05))
     use_iforest = bool(acfg.get("use_isolation_forest", True))
     iforest_weight = float(acfg.get("isolation_forest_weight", 0.20))
+    # See _to_unit()'s docstring: below this raw z-score range, cells are
+    # treated as noise-level variation, not real signal, so the
+    # relative-ranking blend is skipped and a genuinely uniform field can
+    # score near-zero everywhere (zero findings must stay possible).
+    min_z_range = float(acfg.get("min_z_range_for_relative_ranking", 1.0))
     # See _local_robust_z()'s docstring: blends in a spatially-local
     # baseline alongside the whole-field one so a cell isn't flagged just
     # for differing from a DIFFERENT part of a multi-zone field (e.g. a
@@ -226,18 +265,38 @@ def score_frame(
     # Robust z-scores (not naive min-max alone), blending a whole-field
     # baseline with a spatially-local one -- see _local_robust_z()'s
     # docstring for why the local component matters.
-    def _blended_z(raw: np.ndarray) -> np.ndarray:
-        global_z = _robust_z(raw, valid_mask)
+    #
+    # min_mad per feature (2026-09-02, traced from field feedback "zero
+    # findings apparently impossible"): each raw feature has its own
+    # natural scale (lab_distance ~0-1.7, cosine embedding distance ~0-2,
+    # coverage/vegetation fractions ~0-1) -- a genuinely uniform field's
+    # sensor-noise-level differences in that feature can still have a
+    # computed MAD small enough to amplify into a large z-score (see
+    # _robust_z()'s docstring). These floors are calibrated to what a real,
+    # observed, meaningful difference looks like in each feature (see real
+    # zone evidence dumps in Decisions.md) -- engineering priors, tune from
+    # further field review, not scientifically validated constants.
+    min_mad_cfg = acfg.get("min_mad", {})
+    min_mad_cov = float(min_mad_cfg.get("coverage", 0.01))
+    min_mad_col = float(min_mad_cfg.get("color", 0.01))
+    min_mad_veg = float(min_mad_cfg.get("vegetation", 0.01))
+    min_mad_tex = float(min_mad_cfg.get("texture", 0.005))
+    min_mad_emb = float(min_mad_cfg.get("embedding", 0.02))
+
+    def _blended_z(raw: np.ndarray, min_mad: float) -> np.ndarray:
+        global_z = _robust_z(raw, valid_mask, min_mad=min_mad)
         if local_baseline_weight <= 0.0:
             return global_z
-        local_z = _local_robust_z(raw, valid_mask, rows_idx, cols_idx, local_baseline_radius)
+        local_z = _local_robust_z(
+            raw, valid_mask, rows_idx, cols_idx, local_baseline_radius, min_mad=min_mad
+        )
         return (1.0 - local_baseline_weight) * global_z + local_baseline_weight * local_z
 
-    cov_u = _to_unit(_blended_z(cov_raw), valid_mask)
-    col_u = _to_unit(_blended_z(col_raw), valid_mask)
-    veg_u = _to_unit(_blended_z(veg_raw), valid_mask)
-    tex_u = _to_unit(_blended_z(tex_raw), valid_mask)
-    emb_u = _to_unit(_blended_z(emb_raw), valid_mask)
+    cov_u = _to_unit(_blended_z(cov_raw, min_mad_cov), valid_mask, min_z_range=min_z_range)
+    col_u = _to_unit(_blended_z(col_raw, min_mad_col), valid_mask, min_z_range=min_z_range)
+    veg_u = _to_unit(_blended_z(veg_raw, min_mad_veg), valid_mask, min_z_range=min_z_range)
+    tex_u = _to_unit(_blended_z(tex_raw, min_mad_tex), valid_mask, min_z_range=min_z_range)
+    emb_u = _to_unit(_blended_z(emb_raw, min_mad_emb), valid_mask, min_z_range=min_z_range)
 
     iforest_u = np.zeros(n, dtype=np.float64)
     X = np.asarray(feat_matrix, dtype=np.float64)

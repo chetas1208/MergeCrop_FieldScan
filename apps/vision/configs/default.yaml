@@ -57,12 +57,33 @@ anomaly:
   # z-scores alongside the whole-field one. 0.0 = old pure-global behavior;
   # 1.0 = pure-local. Added 2026-09-02 after a real multi-treatment-zone
   # research plot photo showed the pure-global baseline flagging cells
-  # inconsistently across otherwise visually-uniform regions (see
-  # docs/ANOMALY_LOCAL_BASELINE.md) -- median/MAD across the whole field
-  # can't represent three large, distinct, roughly-equal treatment zones
-  # simultaneously.
+  # inconsistently across otherwise visually-uniform regions -- median/MAD
+  # across the whole field can't represent three large, distinct, roughly-
+  # equal treatment zones simultaneously. See cropmerge/anomaly/spatial.py's
+  # _local_robust_z() docstring and git history (commit 3d8ae36) for the
+  # real before/after evidence.
   local_baseline_weight: 0.5
   local_baseline_radius: 2
+  # Real bug fix, 2026-09-02, traced from field feedback ("zero findings
+  # apparently impossible"): the relative-ranking component of _to_unit()
+  # always inflates the "most different" cell toward a high score, even
+  # when the underlying z-scores are all noise-level -- there is always a
+  # most-different cell in any grid. Below this raw z-score range across
+  # valid cells, the ranking blend is skipped entirely, so a genuinely
+  # uniform field can score near-zero everywhere and produce zero findings.
+  # See cropmerge/anomaly/spatial.py::_to_unit()'s docstring.
+  min_z_range_for_relative_ranking: 1.0
+  # Absolute MAD floors per feature (2026-09-02, same "zero findings
+  # apparently impossible" fix as above) -- see cropmerge/anomaly/spatial.py
+  # ::score_frame()'s comment for why each feature needs its own floor
+  # calibrated to its own natural scale. Engineering priors from real
+  # observed evidence values, not scientifically validated constants.
+  min_mad:
+    coverage: 0.01
+    color: 0.01
+    vegetation: 0.01
+    texture: 0.005
+    embedding: 0.02
 
 temporal:
   min_persistent_frames: 3
