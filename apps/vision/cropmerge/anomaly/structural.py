@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 
 from cropmerge.anomaly.grid import GridCell
+from cropmerge.features.management_units import UnitSegmentationResult, UnitType
 from cropmerge.features.rgb_indices import excess_green, vegetation_mask
 from cropmerge.features.row_geometry import (
     RowGeometryConfig,
@@ -250,6 +251,52 @@ def detect_structural_frame(
     )
 
 
+def _local_unit_baselines(
+    cells: list[GridCell],
+    occ: np.ndarray,
+    field_mask: np.ndarray,
+    management_units: UnitSegmentationResult | None,
+    cfg: dict,
+) -> tuple[dict[int, float], dict[tuple[int, int], int]]:
+    """Per-management-unit median occupancy, for cells confidently belonging
+    to an ACTIVE_CROP unit with enough same-unit peers to be statistically
+    meaningful. Returns (unit_baselines, cell->unit_id) -- a cell absent
+    from cell->unit_id (no management_units, no confident unit, or too few
+    peers) falls back to the whole-field baseline exactly as before this
+    was added; this is additive, never a behavior change on its own."""
+    cell_unit_id: dict[tuple[int, int], int] = {}
+    if management_units is None:
+        return {}, cell_unit_id
+
+    mucfg = cfg.get("management_units", {})
+    min_conf = float(mucfg.get("min_confidence_for_local_baseline", 0.3))
+    min_peers = int(mucfg.get("min_peer_cells_for_local_baseline", 3))
+
+    unit_by_id = {u.unit_id: u for u in management_units.units}
+    occ_by_unit: dict[int, list[float]] = {}
+    pos_by_unit: dict[tuple[int, int], int] = {}
+    for cell in cells:
+        if not cell.valid or cell.row >= len(management_units.cell_unit_ids):
+            continue
+        row_ids = management_units.cell_unit_ids[cell.row]
+        if cell.col >= len(row_ids):
+            continue
+        uid = row_ids[cell.col]
+        unit = unit_by_id.get(uid)
+        if unit is None or unit.unit_type != UnitType.ACTIVE_CROP or unit.confidence < min_conf:
+            continue
+        region = field_mask[cell.y0 : cell.y1, cell.x0 : cell.x1]
+        if not np.any(region):
+            continue
+        v = float(np.mean(occ[cell.y0 : cell.y1, cell.x0 : cell.x1][region]))
+        pos_by_unit[(cell.row, cell.col)] = uid
+        occ_by_unit.setdefault(uid, []).append(v)
+
+    unit_baselines = {uid: float(np.median(vals)) for uid, vals in occ_by_unit.items() if len(vals) >= min_peers}
+    cell_unit_id = {pos: uid for pos, uid in pos_by_unit.items() if uid in unit_baselines}
+    return unit_baselines, cell_unit_id
+
+
 def score_structural_cells(
     cells: list[GridCell],
     bgr: np.ndarray,
@@ -257,8 +304,18 @@ def score_structural_cells(
     label_map: np.ndarray,
     crop_mask: np.ndarray | None,
     cfg: dict,
+    management_units: UnitSegmentationResult | None = None,
 ) -> tuple[list[GridCell], StructuralFrameResult]:
-    """Attach structural scores + features to grid cells."""
+    """Attach structural scores + features to grid cells.
+
+    management_units (cropmerge.features.management_units), when provided,
+    gates a LOCAL occupancy baseline: an ACTIVE_CROP cell with enough
+    same-unit ACTIVE_CROP peers is compared against ITS OWN unit's median
+    occupancy, not the whole field's -- see _local_unit_baselines(). Fixes,
+    at the baseline arithmetic level (not just the zone-label level
+    classify_zone_type() already gates), a healthy crop block sitting next
+    to a harvested residue block dragging the whole-field baseline down.
+    """
     scfg = cfg.get("structural", {})
     w_occ = float(scfg.get("weights", {}).get("occupancy_deficit", 0.30))
     w_cont = float(scfg.get("weights", {}).get("continuity_evidence", 0.25))
@@ -282,11 +339,14 @@ def score_structural_cells(
         if cell.valid
     ]
     baseline = float(np.median(valid_occs)) if valid_occs else 0.5
+    unit_baselines, cell_unit_id = _local_unit_baselines(cells, occ, field_mask, management_units, cfg)
 
     for cell in cells:
         if not cell.valid:
             cell.structural_anomaly_score = 0.0
             continue
+
+        local_baseline = unit_baselines.get(cell_unit_id.get((cell.row, cell.col)), baseline)
 
         region = field_mask[cell.y0 : cell.y1, cell.x0 : cell.x1]
         lm = label_map[cell.y0 : cell.y1, cell.x0 : cell.x1]
@@ -296,12 +356,12 @@ def score_structural_cells(
         bare = float(np.mean((lm == SemanticClass.BARE_SOIL.value) & region)) if np.any(region) else 0.0
         crop_frac = float(np.mean((lm == SemanticClass.CROP.value) & region)) if np.any(region) else 0.0
 
-        occ_deficit = max(0.0, baseline - mean_occ) / max(baseline, 0.15)
-        occ_deficit = max(occ_deficit, max(0.0, baseline - local_veg) / max(baseline, 0.15))
+        occ_deficit = max(0.0, local_baseline - mean_occ) / max(local_baseline, 0.15)
+        occ_deficit = max(occ_deficit, max(0.0, local_baseline - local_veg) / max(local_baseline, 0.15))
         # Low vegetation inside crop-labelled region → structural deficit (seg-independent)
-        if local_veg < baseline * 0.55 and baseline >= 0.35:
-            occ_deficit = max(occ_deficit, (baseline - local_veg) / max(baseline, 0.15))
-            score_floor = 0.4 + 0.5 * (1.0 - local_veg / max(baseline, 0.15))
+        if local_veg < local_baseline * 0.55 and local_baseline >= 0.35:
+            occ_deficit = max(occ_deficit, (local_baseline - local_veg) / max(local_baseline, 0.15))
+            score_floor = 0.4 + 0.5 * (1.0 - local_veg / max(local_baseline, 0.15))
         else:
             score_floor = 0.0
         frag_val = float(np.mean(result.fragmentation_mask[cell.y0 : cell.y1, cell.x0 : cell.x1][region]))
@@ -328,9 +388,9 @@ def score_structural_cells(
         ) / max(wsum, 1e-6)
 
         # Interior bare-soil or low-veg island
-        if bare >= 0.2 and baseline >= 0.45 and crop_frac < 0.5:
+        if bare >= 0.2 and local_baseline >= 0.45 and crop_frac < 0.5:
             score_floor = max(score_floor, 0.35 + 0.45 * bare)
-        if local_veg < 0.25 and baseline >= 0.5:
+        if local_veg < 0.25 and local_baseline >= 0.5:
             score_floor = max(score_floor, 0.45)
 
         if score_floor > 0:
