@@ -35,10 +35,11 @@ from cropmerge.pipeline.processor import FieldTriageProcessor
 from cropmerge.pipeline.schemas import ANALYSIS_VERSION, FieldTriageReport
 from cropmerge.storage.analysis_cache import AnalysisCache, compute_cache_key, config_content_hash
 from cropmerge.segmentation.sam3 import sam3_available
+from cropmerge.pipeline.collection_analysis import CollectionImageInput, analyze_collection_images
 from cropmerge.storage.blob_store import BlobStore
 from cropmerge.storage.collection_manifest import CollectionIngestResult, ingest_zip_collection
 from cropmerge.storage.manifest import Manifest
-from cropmerge.storage.materialize import materialize_source
+from cropmerge.storage.materialize import materialize_blob, materialize_source
 from cropmerge.storage.policies import StorageClass
 from cropmerge.storage.zip_collection import ZipLimits
 
@@ -240,6 +241,13 @@ class AnalysisRequest(BaseModel):
     # acts as a hard cap for callers that want one.
     max_frames: int | None = Field(default=None, alias="maxFrames", gt=0, le=MAX_FRAMES_CEILING)
     skip_dino: bool = Field(default=False, alias="skipDino")
+    segmentation_backend: str = Field(default="heuristic", alias="segmentationBackend", min_length=1, max_length=64)
+    dino_backend: str = Field(default="heuristic", alias="dinoBackend", min_length=1, max_length=64)
+
+    model_config = {"populate_by_name": True}
+
+
+class CollectionAnalysisRequest(BaseModel):
     segmentation_backend: str = Field(default="heuristic", alias="segmentationBackend", min_length=1, max_length=64)
     dino_backend: str = Field(default="heuristic", alias="dinoBackend", min_length=1, max_length=64)
 
@@ -961,6 +969,107 @@ async def _ingest_collection_upload(file: UploadFile) -> CollectionIngestResult:
         tmp_path.unlink(missing_ok=True)
 
 
+def _collection_analysis_record_path(collection_id: str) -> Path:
+    return settings().data_dir / "collections" / f"{collection_id}-analysis.json"
+
+
+def _materialize_collection_image(collection_id: str, image: dict[str, Any]) -> Path:
+    """Resolve one collection image's CAS blob to a real, decoder-safe file
+    on disk. Raises (never silently substitutes another file) if the blob
+    is missing -- a collection image's only-ever representation is its CAS
+    blob, there is no separate "original path" fallback the way an upload's
+    completed_path is (see materialize_blob()'s docstring)."""
+    entry = _storage().get(f"collection:{collection_id}:image:{image['id']}")
+    if entry is None:
+        raise FileNotFoundError(f"no CAS manifest entry for collection image {image['id']}")
+    suffix = Path(image["archivePath"]).suffix.lower()
+    work_dir = settings().data_dir / "tmp" / "collection-materialized" / collection_id
+    return materialize_blob(_storage().blob_store, entry.sha256, work_dir, suffix)
+
+
+def _run_collection_analysis(collection_id: str, body: "CollectionAnalysisRequest") -> dict[str, Any]:
+    record = _read_collection_record(collection_id)
+    valid_images = [img for img in record["images"] if img["status"] == "valid"]
+
+    inputs: list[CollectionImageInput] = []
+    materialize_failures: list[dict[str, Any]] = []
+    for img in valid_images:
+        try:
+            path = _materialize_collection_image(collection_id, img)
+            inputs.append(CollectionImageInput(image_id=img["id"], relative_group=img["relativeGroup"], path=path))
+        except Exception as exc:
+            log.exception("Failed to materialize collection image %s/%s", collection_id, img["id"])
+            materialize_failures.append({"imageId": img["id"], "error": str(exc)})
+
+    output_root = settings().output_dir / "collections" / collection_id
+    result = analyze_collection_images(
+        collection_id,
+        inputs,
+        output_root,
+        load_config(),
+        segmentation_backend=body.segmentation_backend,
+        dino_backend=body.dino_backend,
+    )
+
+    payload = {
+        "collectionId": collection_id,
+        "analyzedAt": _now(),
+        "imageResults": [
+            {
+                "imageId": r.image_id,
+                "relativeGroup": r.relative_group,
+                "status": r.status,
+                "error": r.error,
+                "fieldDetected": r.field_detected,
+                "cropCoverage": r.crop_coverage,
+                "bareSoilFraction": r.bare_soil_fraction,
+            }
+            for r in result.image_results
+        ]
+        + [
+            {
+                "imageId": f["imageId"], "relativeGroup": None, "status": "failed",
+                "error": f["error"], "fieldDetected": None, "cropCoverage": None, "bareSoilFraction": None,
+            }
+            for f in materialize_failures
+        ],
+        "groupStatistics": [
+            {
+                "group": g.group,
+                "imageCount": g.image_count,
+                "cropCoverageMedian": g.crop_coverage_median,
+                "cropCoverageIqr": list(g.crop_coverage_iqr) if g.crop_coverage_iqr else None,
+                "bareSoilMedian": g.bare_soil_median,
+                "bareSoilIqr": list(g.bare_soil_iqr) if g.bare_soil_iqr else None,
+            }
+            for g in result.group_statistics
+        ],
+        "summary": {
+            "totalValidImages": len(valid_images),
+            "analyzedCount": result.analyzed_count,
+            "failedCount": result.failed_count + len(materialize_failures),
+        },
+    }
+
+    path = _collection_analysis_record_path(collection_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        handle.write(json.dumps(payload, indent=2))
+        temp = Path(handle.name)
+    temp.replace(path)
+    return payload
+
+
+def _read_collection_analysis_record(collection_id: str) -> dict[str, Any]:
+    path = _collection_analysis_record_path(collection_id)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Collection has not been analyzed yet")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Collection analysis metadata is unreadable") from exc
+
+
 _JPEG_SUFFIXES = {".jpg", ".jpeg"}
 
 
@@ -1297,6 +1406,14 @@ def create_app() -> FastAPI:
     @app.get("/vision/collections/{collection_id}")
     def get_collection(collection_id: str, _: SessionClaims):
         return _public_collection(_read_collection_record(_valid_collection_id(collection_id)))
+
+    @app.post("/vision/collections/{collection_id}/analyze")
+    def analyze_collection(collection_id: str, body: CollectionAnalysisRequest, _: SessionClaims):
+        return _run_collection_analysis(_valid_collection_id(collection_id), body)
+
+    @app.get("/vision/collections/{collection_id}/analysis")
+    def get_collection_analysis(collection_id: str, _: SessionClaims):
+        return _read_collection_analysis_record(_valid_collection_id(collection_id))
 
     @app.post("/vision/analyses", status_code=202)
     def create_analysis(body: AnalysisRequest, request: Request, response: Response, _: SessionClaims):

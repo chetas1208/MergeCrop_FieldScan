@@ -33,6 +33,34 @@ from cropmerge.storage.manifest import Manifest
 log = logging.getLogger("cropmerge.storage.materialize")
 
 
+def materialize_blob(blob_store, sha256: str, work_dir: Path, suffix: str) -> Path:
+    """Materialize one CAS blob directly by its hash into a decoder-safe,
+    suffix-preserving path -- the core hardlink/symlink/copy logic shared
+    by materialize_source() below. Unlike materialize_source(), this RAISES
+    on failure (FileNotFoundError if the blob is missing, or an OSError from
+    a failed copy) rather than silently returning a fallback -- callers
+    without a meaningful fallback path (e.g. a collection image whose only
+    ever representation was its CAS blob) should catch and handle this
+    themselves rather than have a fallback fabricated for them.
+    """
+    blob_path = blob_store.get(sha256)  # raises FileNotFoundError if missing
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    materialized_path = work_dir / f"{sha256}{suffix}"
+
+    if materialized_path.is_file():
+        return materialized_path
+
+    try:
+        os.link(blob_path, materialized_path)
+    except OSError:
+        try:
+            materialized_path.symlink_to(blob_path)
+        except OSError:
+            shutil.copyfile(blob_path, materialized_path)
+    return materialized_path
+
+
 def materialize_source(
     manifest: Manifest,
     logical_id: str,
@@ -56,23 +84,8 @@ def materialize_source(
         if entry is None:
             return fallback_path
 
-        blob_path = manifest.blob_store.get(entry.sha256)
         effective_suffix = suffix if suffix is not None else fallback_path.suffix
-        work_dir = Path(work_dir)
-        work_dir.mkdir(parents=True, exist_ok=True)
-        materialized_path = work_dir / f"{entry.sha256}{effective_suffix}"
-
-        if materialized_path.is_file():
-            return materialized_path
-
-        try:
-            os.link(blob_path, materialized_path)
-        except OSError:
-            try:
-                materialized_path.symlink_to(blob_path)
-            except OSError:
-                shutil.copyfile(blob_path, materialized_path)
-        return materialized_path
+        return materialize_blob(manifest.blob_store, entry.sha256, work_dir, effective_suffix)
     except Exception:
         log.exception(
             "Materialization failed for logical_id=%s, falling back to %s", logical_id, fallback_path

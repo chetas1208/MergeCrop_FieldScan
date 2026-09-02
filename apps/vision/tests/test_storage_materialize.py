@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from cropmerge.storage.blob_store import BlobStore
 from cropmerge.storage.manifest import Manifest
 from cropmerge.storage.materialize import materialize_source
@@ -80,3 +82,27 @@ def test_materialize_never_raises_and_falls_back_on_missing_blob(tmp_path: Path)
     result = materialize_source(manifest, "upload:y", fallback, tmp_path / "materialized")
 
     assert result == fallback
+
+
+def test_materialize_blob_directly_by_hash(tmp_path: Path):
+    from cropmerge.storage.materialize import materialize_blob
+
+    manifest = _manifest(tmp_path)
+    content = b"collection image bytes"
+    original = tmp_path / "source.jpg"
+    original.write_bytes(content)
+    blob_ref = manifest.blob_store.put(original)
+
+    result = materialize_blob(manifest.blob_store, blob_ref.sha256, tmp_path / "materialized", ".jpg")
+
+    assert result.suffix == ".jpg"
+    assert result.read_bytes() == content
+
+
+def test_materialize_blob_raises_when_blob_missing_no_silent_fallback(tmp_path: Path):
+    from cropmerge.storage.materialize import materialize_blob
+
+    manifest = _manifest(tmp_path)
+
+    with pytest.raises(FileNotFoundError):
+        materialize_blob(manifest.blob_store, "a" * 64, tmp_path / "materialized", ".jpg")
