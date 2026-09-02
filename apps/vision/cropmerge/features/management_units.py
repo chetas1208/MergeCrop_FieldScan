@@ -33,6 +33,28 @@ management-unit boundaries this session does not have -- not done here.
 
 Engineering thresholds/weights below are priors, not scientifically
 calibrated constants -- tune from real field review.
+
+REAL CALIBRATION DATA (2026-09-02, run against the actual provided overhead
+photo through the heuristic segmenter, not just the synthetic test fixtures
+below): the default boundary_threshold=0.25 was too permissive for this
+real image and collapsed everything into ONE unit. Sweeping the threshold
+on that same real photo:
+
+    threshold=0.02 -> 23 units (over-segmented -- noise-level splits)
+    threshold=0.05 -> 10 units
+    threshold=0.08 ->  3 units, areas [0.88, 0.10, 0.02]
+    threshold=0.10 ->  1 unit  (under-segmented)
+
+This confirms the algorithm IS sensitive to real feature differences (it is
+not a no-op), but the synthetic test fixtures below use deliberately stark
+color contrasts (pure green vs. pure tan) that are larger than this real
+photo's actual zone-to-zone differences -- so a threshold tuned to "obviously
+correct" on synthetic data is NOT automatically correct on real imagery.
+0.25 stays the code default here (unchanged, not silently tuned from a
+single uncontrolled data point) but ~0.08 is a more realistic real-world
+starting point worth testing further; no ground-truth management-unit
+labels exist yet to pick a definitively "correct" value from this one
+sample. This whole finding is exactly why this module ships SHADOW-ONLY.
 """
 
 from __future__ import annotations
