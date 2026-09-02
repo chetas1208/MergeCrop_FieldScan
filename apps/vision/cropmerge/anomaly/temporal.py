@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from cropmerge.anomaly.consensus import evaluate_consensus
 from cropmerge.anomaly.explain import (
     combined_review_score,
     explain_zone,
@@ -181,6 +182,35 @@ def aggregate_zones(
         cov_deltas = [c.features.get("coverage_delta", 0.0) for c in tr.cells]
         mean_reg = float(np.mean(tr.reg_confs)) if tr.reg_confs else None
 
+        evidence = ZoneEvidence(
+            crop_coverage_delta=round(float(np.mean(cov_deltas)), 4),
+            color_difference=round(float(rep.features.get("color_difference", 0)), 4),
+            vegetation_difference=round(float(rep.features.get("vegetation_difference", 0)), 4),
+            texture_difference=round(float(rep.features.get("texture_difference", 0)), 4),
+            embedding_difference=round(float(rep.features.get("embedding_difference", 0)), 4),
+            persistence=round(persistence, 4),
+            appearance_anomaly_score=round(mean_appear, 4),
+            structural_anomaly_score=round(mean_struct, 4),
+            row_continuity_before=round(float(rep.features.get("row_continuity_before", 0)), 4),
+            row_continuity_after=round(float(rep.features.get("row_continuity_after", 0)), 4),
+            gap_extent_normalized=round(float(rep.features.get("gap_length_score", 0)), 4),
+            soil_exposure_delta=round(float(rep.features.get("soil_exposure_delta", 0)), 4),
+            fragmentation_score=round(float(rep.features.get("fragmentation_score", 0)), 4),
+            registration_confidence=round(mean_reg, 4) if mean_reg is not None else None,
+        )
+
+        # Evidence-family consensus gate (see consensus.py's module docstring
+        # for why this matters — a real user-reported false-positive pattern
+        # traced to appearance-only evidence reaching "high" priority with no
+        # structural corroboration). Downgrade-only: never raises a zone's
+        # priority, only caps "high" to "medium" when unsupported.
+        consensus_downgraded = False
+        if pri == "high":
+            consensus = evaluate_consensus(evidence)
+            if not consensus.high_confidence_supported:
+                pri = "medium"
+                consensus_downgraded = True
+
         reasons = explain_zone(
             rep,
             cfg,
@@ -193,6 +223,12 @@ def aggregate_zones(
         )
         if not reasons:
             continue
+        if consensus_downgraded:
+            reasons = [
+                *reasons,
+                "Capped at Medium — appearance-based evidence alone, without an "
+                "independent structural signal to corroborate it",
+            ]
 
         bb = tr.bboxes[rep_idx]
         zones.append(
@@ -221,36 +257,7 @@ def aggregate_zones(
                     "w": round(bb[2], 4),
                     "h": round(bb[3], 4),
                 },
-                evidence=ZoneEvidence(
-                    crop_coverage_delta=round(float(np.mean(cov_deltas)), 4),
-                    color_difference=round(float(rep.features.get("color_difference", 0)), 4),
-                    vegetation_difference=round(
-                        float(rep.features.get("vegetation_difference", 0)), 4
-                    ),
-                    texture_difference=round(float(rep.features.get("texture_difference", 0)), 4),
-                    embedding_difference=round(
-                        float(rep.features.get("embedding_difference", 0)), 4
-                    ),
-                    persistence=round(persistence, 4),
-                    appearance_anomaly_score=round(mean_appear, 4),
-                    structural_anomaly_score=round(mean_struct, 4),
-                    row_continuity_before=round(
-                        float(rep.features.get("row_continuity_before", 0)), 4
-                    ),
-                    row_continuity_after=round(
-                        float(rep.features.get("row_continuity_after", 0)), 4
-                    ),
-                    gap_extent_normalized=round(
-                        float(rep.features.get("gap_length_score", 0)), 4
-                    ),
-                    soil_exposure_delta=round(
-                        float(rep.features.get("soil_exposure_delta", 0)), 4
-                    ),
-                    fragmentation_score=round(
-                        float(rep.features.get("fragmentation_score", 0)), 4
-                    ),
-                    registration_confidence=round(mean_reg, 4) if mean_reg is not None else None,
-                ),
+                evidence=evidence,
                 reasons=reasons,
                 recommendation=recommendation(
                     pri,
