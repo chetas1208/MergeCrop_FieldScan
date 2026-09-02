@@ -35,6 +35,30 @@ def test_compute_farmtech_observation_canopy_only_without_crop_mask():
     assert result.structure.soil_fraction == 0.1
 
 
+def test_compute_farmtech_observation_populates_residue_classification():
+    bgr = np.zeros((50, 50, 3), dtype=np.uint8)
+    bgr[:] = (90, 140, 180)  # tan/brown, smooth -> likely_bare_soil
+    field = np.ones((50, 50), dtype=bool)
+    label = np.full((50, 50), "BARE_SOIL", dtype=object)
+
+    result = compute_farmtech_observation(bgr, field, None, 1.0, None, None, label_map=label)
+
+    assert result is not None
+    assert result.structure.residue_classification == "likely_bare_soil"
+    assert result.structure.residue_confidence_note is not None
+
+
+def test_compute_farmtech_observation_residue_none_without_soil_area():
+    bgr = np.full((50, 50, 3), 120, dtype=np.uint8)
+    field = np.ones((50, 50), dtype=bool)
+    label = np.full((50, 50), "CROP", dtype=object)  # no BARE_SOIL pixels
+
+    result = compute_farmtech_observation(bgr, field, None, 0.0, None, None, label_map=label)
+
+    assert result is not None
+    assert result.structure.residue_classification is None
+
+
 def test_compute_farmtech_observation_never_raises_on_bad_input():
     # Mismatched shapes should be caught and return None, not propagate.
     bgr = np.zeros((10, 10, 3), dtype=np.uint8)

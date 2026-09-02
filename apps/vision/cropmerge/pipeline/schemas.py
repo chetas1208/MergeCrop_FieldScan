@@ -168,6 +168,14 @@ class FarmTechStructure(BaseModel):
     # only ever be a "visible weed cover" signal, never a total/hidden one.
     understory_vegetation_fraction: float | None = None
     vegetated_soil_fraction_of_field: float | None = None
+    # Residue/stubble vs bare-soil vs unknown, over the BARE_SOIL-classified
+    # field area — see cropmerge/features/residue_detection.py's module
+    # docstring for why this is conservative-by-design (UNKNOWN whenever
+    # evidence is ambiguous, never a forced confident call). One of:
+    # "living_vegetation" | "likely_residue" | "likely_bare_soil" | "unknown"
+    # | None (no BARE_SOIL area to evaluate this observation).
+    residue_classification: str | None = None
+    residue_confidence_note: str | None = None
 
 
 class FarmTechObservation(BaseModel):
@@ -311,6 +319,8 @@ def farm_tech_to_camel_dict(ft: FarmTechObservation | None) -> dict[str, Any] | 
             "fragmentation": ft.structure.fragmentation,
             "understoryVegetationFraction": ft.structure.understory_vegetation_fraction,
             "vegetatedSoilFractionOfField": ft.structure.vegetated_soil_fraction_of_field,
+            "residueClassification": ft.structure.residue_classification,
+            "residueConfidenceNote": ft.structure.residue_confidence_note,
         },
     }
 

@@ -125,6 +125,8 @@ export const farmTechStructureSchema = z.object({
   fragmentation: z.number(),
   understoryVegetationFraction: z.number().nullish(),
   vegetatedSoilFractionOfField: z.number().nullish(),
+  residueClassification: z.enum(['living_vegetation', 'likely_residue', 'likely_bare_soil', 'unknown']).nullish(),
+  residueConfidenceNote: z.string().nullish(),
 })
 
 export const farmTechObservationSchema = z.object({

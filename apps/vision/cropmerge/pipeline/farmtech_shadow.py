@@ -22,6 +22,7 @@ import logging
 import numpy as np
 
 from cropmerge.features.observability import classify_observability
+from cropmerge.features.residue_detection import classify_residue_evidence
 from cropmerge.features.rgb_indices import excess_green, vari
 from cropmerge.features.row_geometry import RowGeometryConfig, analyze_row_geometry
 from cropmerge.features.weed_pressure import understory_vegetation_fraction
@@ -30,6 +31,7 @@ from cropmerge.pipeline.schemas import (
     FarmTechRowGeometry,
     FarmTechStructure,
     FarmTechVegetation,
+    SemanticClass,
 )
 
 log = logging.getLogger("cropmerge.pipeline.farmtech_shadow")
@@ -73,10 +75,18 @@ def compute_farmtech_observation(
         )
         understory_fraction: float | None = None
         vegetated_soil_of_field: float | None = None
+        residue_classification: str | None = None
+        residue_note: str | None = None
         if label_map is not None:
             weed = understory_vegetation_fraction(bgr, field, label_map)
             understory_fraction = weed["understoryVegetationFraction"]
             vegetated_soil_of_field = weed["vegetatedSoilFractionOfField"]
+
+            soil_mask = (label_map == SemanticClass.BARE_SOIL.value) & field
+            if np.any(soil_mask):
+                residue = classify_residue_evidence(bgr, soil_mask)
+                residue_classification = residue.classification.value
+                residue_note = residue.confidence_note
 
         structure = FarmTechStructure(
             crop_occupancy=crop_occupancy,
@@ -84,6 +94,8 @@ def compute_farmtech_observation(
             fragmentation=fragmentation,
             understory_vegetation_fraction=understory_fraction,
             vegetated_soil_fraction_of_field=vegetated_soil_of_field,
+            residue_classification=residue_classification,
+            residue_confidence_note=residue_note,
         )
 
         row_geometry: FarmTechRowGeometry | None = None

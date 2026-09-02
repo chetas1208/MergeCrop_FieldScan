@@ -132,6 +132,12 @@ export interface FarmTechStructure {
    * imagery cannot see. Null when not computed for this observation. */
   understoryVegetationFraction?: number | null
   vegetatedSoilFractionOfField?: number | null
+  /** Residue/stubble vs bare-soil vs unknown over the BARE_SOIL-classified
+   * field area — deliberately conservative, "unknown" whenever evidence is
+   * ambiguous rather than a forced confident call. Not a trained
+   * classifier. Null when there was no soil-classified area to evaluate. */
+  residueClassification?: 'living_vegetation' | 'likely_residue' | 'likely_bare_soil' | 'unknown' | null
+  residueConfidenceNote?: string | null
 }
 
 /** Shadow-only per-observation FarmTech evidence — recorded for review, not
