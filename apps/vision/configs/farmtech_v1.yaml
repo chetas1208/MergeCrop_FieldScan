@@ -1,0 +1,65 @@
+# FarmTech-native config surface.
+#
+# Holds named, documented parameters for the row-geometry module
+# (cropmerge/features/row_geometry.py) and the observability router
+# (cropmerge/features/observability.py). Mirrors the shape/format of
+# configs/default.yaml (loaded the same way, via
+# cropmerge.config.load_config(path=...)).
+#
+# NOT YET WIRED into cropmerge/pipeline/processor.py or loaded by default --
+# this file documents the intended thresholds for the phase that adds that
+# integration. See docs/FARMTECH_RESEARCH_BASIS.md ("Explicitly deferred")
+# and docs/FARMTECH_METHOD_TRACEABILITY.md.
+#
+# The two blocks below correspond field-for-field to
+# cropmerge.features.row_geometry.RowGeometryConfig and
+# cropmerge.features.observability.ObservabilityThresholds -- keep them in
+# sync if either dataclass's defaults change.
+
+row_geometry:
+  # Morphological open/close kernel sizes (px) applied to the crop mask
+  # before skeleton thinning, to remove speckle noise and close small gaps.
+  morph_open_px: 3
+  morph_close_px: 5
+
+  # Probabilistic Hough Transform (cv2.HoughLinesP) parameters, run on the
+  # thinned skeleton to find dominant row-line segment candidates.
+  hough_rho_px: 1.0
+  hough_theta_deg: 1.0
+  hough_threshold: 30
+  hough_min_line_length_px: 20
+  hough_max_line_gap_px: 10
+
+  # Row-line clustering: segments within angle_cluster_tol_deg of the
+  # robust (circular-median) dominant angle are treated as row-aligned;
+  # row-aligned segments whose perpendicular-offset positions are within
+  # row_position_tol_px of each other are merged into one row-line cluster
+  # (one physical detected row).
+  angle_cluster_tol_deg: 12.0
+  row_position_tol_px: 15.0
+
+  # A row-line cluster only counts toward num_consistent_rows if its
+  # combined (summed) Hough segment length reaches this many pixels.
+  min_row_support_px: 60.0
+
+observability:
+  # ROW_RESOLVABLE requires structure-tensor coherence (0..1) at or above
+  # this level -- see row_geometry.structure_tensor_orientation.
+  min_row_coherence: 0.35
+
+  # ROW_RESOLVABLE requires the strongest row-line cluster's summed pixel
+  # support to reach this level -- see
+  # row_geometry.RowGeometryResult.row_line_support_px.
+  min_row_line_support_px: 60.0
+
+  # ROW_RESOLVABLE requires at least this many distinct, consistent row
+  # lines (a single line is not enough -- could be a fence/road/shadow
+  # edge rather than crop rows).
+  min_consistent_rows: 2
+
+  # PLANT_RESOLVABLE additionally requires per-row plant-level detection
+  # evidence at or above these levels. No plant detector exists in this
+  # codebase yet (see docs/FARMTECH_RESEARCH_BASIS.md, Wang et al. 2023) --
+  # this tier documents the intended contract for when one is added.
+  min_plant_detections_per_row: 3
+  min_plant_detection_confidence: 0.6
