@@ -60,6 +60,7 @@ sample. This whole finding is exactly why this module ships SHADOW-ONLY.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 
 import numpy as np
 
@@ -76,12 +77,96 @@ _RESIDUE_SCORE = {
 }
 
 
+class UnitType(str, Enum):
+    """What a management unit actually IS, agronomically -- the load-bearing
+    gate for downstream anomaly scoring (a RESIDUE_STUBBLE/BARE_SOIL/NON_CROP
+    unit must never produce a "Possible Crop Gap"/"Sparse Crop Coverage"
+    finding, because it contains no standing crop to be sparse or gapped)."""
+
+    ACTIVE_CROP = "active_crop"
+    RESIDUE_STUBBLE = "residue_stubble"
+    BARE_SOIL = "bare_soil"
+    NON_CROP = "non_crop"
+    UNKNOWN = "unknown"
+
+
+# Vegetation fraction above which a unit is considered to have standing
+# crop present, regardless of some residue-classified cells within it
+# (e.g. crop rows over visible inter-row residue/mulch).
+_ACTIVE_CROP_VEG_THRESHOLD = 0.20
+_NON_CROP_LABEL_THRESHOLD = 0.5
+_MIN_CELLS_FOR_FULL_CONFIDENCE = 6
+
+
+def classify_unit_type(
+    mean_vegetation_fraction: float,
+    dominant_residue_class: ResidueClass,
+    mean_non_crop_label_fraction: float,
+) -> UnitType:
+    """Deterministic, threshold-based classification -- no learned model,
+    no confidence-free guess. Order matters: non-crop land cover (road,
+    tree canopy, water, infrastructure) overrides everything else, since a
+    unit can't simultaneously be a farmed block and a farm road."""
+    if mean_non_crop_label_fraction >= _NON_CROP_LABEL_THRESHOLD:
+        return UnitType.NON_CROP
+    if mean_vegetation_fraction >= _ACTIVE_CROP_VEG_THRESHOLD:
+        return UnitType.ACTIVE_CROP
+    if dominant_residue_class == ResidueClass.LIKELY_RESIDUE:
+        return UnitType.RESIDUE_STUBBLE
+    if dominant_residue_class == ResidueClass.LIKELY_BARE_SOIL:
+        return UnitType.BARE_SOIL
+    return UnitType.UNKNOWN
+
+
+def unit_type_confidence(
+    members: list[CellFeatures],
+    unit_type: UnitType,
+    dominant_residue_class: ResidueClass,
+) -> float:
+    """Confidence based on real, observable internal consistency -- never a
+    fabricated neural score. Two real signals, both in [0, 1]:
+
+    1. Semantic agreement: fraction of member cells whose OWN residue_class
+       (or vegetation regime, for ACTIVE_CROP) agrees with the unit's
+       assigned type. A unit built from cells that mostly agree is more
+       trustworthy than one built from a bare majority.
+    2. Spatial support: cell_count relative to a minimum sample size
+       (_MIN_CELLS_FOR_FULL_CONFIDENCE) -- a 1-cell "unit" is definitionally
+       less confident than a well-sampled one, independent of agreement.
+
+    Final confidence is the product of the two -- either one being weak
+    caps the result, which is the honest behavior (a large but internally
+    inconsistent unit should not read as confident, nor should a small but
+    perfectly uniform one)."""
+    if not members:
+        return 0.0
+
+    if unit_type == UnitType.ACTIVE_CROP:
+        agree = sum(1 for m in members if m.vegetation_fraction >= _ACTIVE_CROP_VEG_THRESHOLD)
+    elif unit_type == UnitType.RESIDUE_STUBBLE:
+        agree = sum(1 for m in members if m.residue_class == ResidueClass.LIKELY_RESIDUE)
+    elif unit_type == UnitType.BARE_SOIL:
+        agree = sum(1 for m in members if m.residue_class == ResidueClass.LIKELY_BARE_SOIL)
+    elif unit_type == UnitType.NON_CROP:
+        agree = sum(1 for m in members if m.non_crop_label_fraction >= _NON_CROP_LABEL_THRESHOLD)
+    else:
+        agree = sum(1 for m in members if m.residue_class == ResidueClass.UNKNOWN)
+    agreement_fraction = agree / len(members)
+
+    spatial_support = min(1.0, len(members) / _MIN_CELLS_FOR_FULL_CONFIDENCE)
+
+    return agreement_fraction * spatial_support
+
+
 @dataclass(frozen=True)
 class UnitBoundaryWeights:
     vegetation: float = 0.35
     residue: float = 0.25
     color: float = 0.20
     row_orientation: float = 0.20
+
+
+_NON_CROP_LABELS = {"ROAD_PATH", "TREE_VEGETATION", "WATER", "INFRASTRUCTURE"}
 
 
 @dataclass(frozen=True)
@@ -95,6 +180,8 @@ class CellFeatures:
     color_mean_bgr: tuple[float, float, float]
     row_angle_deg: float | None
     row_coherence: float
+    crop_label_fraction: float = 0.0  # fraction of cell classified CROP by the segmentation label_map
+    non_crop_label_fraction: float = 0.0  # ROAD_PATH/TREE_VEGETATION/WATER/INFRASTRUCTURE
 
 
 @dataclass(frozen=True)
@@ -105,6 +192,8 @@ class ManagementUnit:
     mean_vegetation_fraction: float
     dominant_residue_class: str
     mean_row_angle_deg: float | None
+    unit_type: UnitType = UnitType.UNKNOWN
+    confidence: float = 0.0
 
 
 @dataclass
@@ -147,6 +236,14 @@ def compute_cell_features(
         stats = color_stats(bgr, region_mask)
         color_mean = (stats.get("b_mean", 0.0), stats.get("g_mean", 0.0), stats.get("r_mean", 0.0))
 
+        if label_map is not None:
+            region_labels = label_map[region_mask]
+            crop_label_frac = float(np.mean(region_labels == "CROP")) if region_labels.size else 0.0
+            non_crop_mask = np.isin(region_labels, list(_NON_CROP_LABELS))
+            non_crop_label_frac = float(np.mean(non_crop_mask)) if region_labels.size else 0.0
+        else:
+            crop_label_frac, non_crop_label_frac = 0.0, 0.0
+
         crop_region = region_mask & (label_map == "CROP") if label_map is not None else region_mask
         angle, coherence = None, 0.0
         if np.count_nonzero(crop_region) >= 100:
@@ -158,6 +255,7 @@ def compute_cell_features(
                 row=cell.row, col=cell.col, valid=True, vegetation_fraction=veg_frac,
                 residue_class=residue.classification, residue_score=_RESIDUE_SCORE[residue.classification],
                 color_mean_bgr=color_mean, row_angle_deg=angle, row_coherence=coherence,
+                crop_label_fraction=crop_label_frac, non_crop_label_fraction=non_crop_label_frac,
             )
         )
     return features
@@ -263,14 +361,20 @@ def segment_management_units(
             residue_counts[m.residue_class] = residue_counts.get(m.residue_class, 0) + 1
         dominant = max(residue_counts, key=lambda k: residue_counts[k])
         angles = [m.row_angle_deg for m in members if m.row_angle_deg is not None]
+        mean_veg = float(np.mean([m.vegetation_fraction for m in members]))
+        mean_non_crop = float(np.mean([m.non_crop_label_fraction for m in members]))
+        u_type = classify_unit_type(mean_veg, dominant, mean_non_crop)
+        confidence = unit_type_confidence(members, u_type, dominant)
         units.append(
             ManagementUnit(
                 unit_id=unit_id,
                 cell_count=len(members),
                 area_fraction=len(members) / valid_cell_count if valid_cell_count else 0.0,
-                mean_vegetation_fraction=float(np.mean([m.vegetation_fraction for m in members])),
+                mean_vegetation_fraction=mean_veg,
                 dominant_residue_class=dominant.value,
                 mean_row_angle_deg=float(np.mean(angles)) if angles else None,
+                unit_type=u_type,
+                confidence=confidence,
             )
         )
 

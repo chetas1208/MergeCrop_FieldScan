@@ -170,7 +170,7 @@ def aggregate_zones(
         rep_idx = int(np.argmax(tr.combined_scores))
         rep = tr.cells[rep_idx]
         row_vis = rep.row_visibility or "LOW"
-        type_key = classify_zone_type(rep, row_vis)
+        type_key = classify_zone_type(rep, row_vis, rep.management_unit_type, rep.management_unit_confidence)
         try:
             primary_type = InspectionZoneType(type_key)
         except ValueError:

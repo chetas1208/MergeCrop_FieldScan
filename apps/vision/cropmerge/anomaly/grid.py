@@ -22,6 +22,8 @@ class GridCell:
     structural_anomaly_score: float = 0.0
     contributions: dict[str, float] = field(default_factory=dict)
     row_visibility: str = "LOW"
+    management_unit_type: str | None = None
+    management_unit_confidence: float = 0.0
 
 
 def build_grid(h: int, w: int, rows: int, cols: int) -> list[GridCell]:

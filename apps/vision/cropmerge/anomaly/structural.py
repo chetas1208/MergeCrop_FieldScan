@@ -353,8 +353,39 @@ def score_structural_cells(
     return cells, result
 
 
-def classify_zone_type(cell: GridCell, row_visibility: str) -> str:
-    """Map cell features → InspectionZoneType value."""
+_NON_ACTIVE_CROP_UNIT_TYPES = {"residue_stubble", "bare_soil", "non_crop"}
+_UNIT_GATE_MIN_CONFIDENCE = 0.3
+
+
+def classify_zone_type(
+    cell: GridCell,
+    row_visibility: str,
+    unit_type: str | None = None,
+    unit_confidence: float = 0.0,
+) -> str:
+    """Map cell features → InspectionZoneType value.
+
+    unit_type/unit_confidence come from cropmerge.features.management_units
+    (populated per-cell in pipeline/frame_analysis.py) and gate crop-specific
+    findings: a cell whose management unit is confidently RESIDUE_STUBBLE/
+    BARE_SOIL/NON_CROP contains no standing crop, so it can never
+    legitimately produce "stand_gap"/"sparse_canopy" — those findings claim
+    crop that should be present isn't. Real regression this fixes: a
+    harvested residue block was being flagged as a crop gap purely because
+    it looks different from a green-crop whole-field baseline.
+    """
+    raw = _raw_zone_type(cell, row_visibility)
+    if (
+        unit_type in _NON_ACTIVE_CROP_UNIT_TYPES
+        and unit_confidence >= _UNIT_GATE_MIN_CONFIDENCE
+        and raw in {"stand_gap", "sparse_canopy", "row_discontinuity"}
+    ):
+        return "general_visual_variation" if unit_type == "non_crop" else "exposed_soil"
+    return raw
+
+
+def _raw_zone_type(cell: GridCell, row_visibility: str) -> str:
+    """Original feature→type mapping, pre management-unit gating."""
     struct = getattr(cell, "structural_anomaly_score", 0.0)
     appear = getattr(cell, "appearance_anomaly_score", cell.anomaly_score)
     feats = cell.features
