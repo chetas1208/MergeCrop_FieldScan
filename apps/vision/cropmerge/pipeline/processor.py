@@ -311,17 +311,18 @@ class FieldTriageProcessor:
             if self.cfg.get("output", {}).get("write_frames", True):
                 write_image(frames_dir / f"frame_{fr.index:04d}.jpg", fr.bgr)
             write_image(overlays_dir / f"overlay_{fr.index:04d}.jpg", ann)
-            cont = annotate_frame(
-                fr.bgr,
-                seg.label_map,
-                seg.field_mask,
-                zones if field_detected else [],
-                fr.timestamp_sec,
-                self.cfg,
-                structural=sres,
-                overlay_mode="continuity",
-            )
-            write_image(overlays_dir / f"continuity_{fr.index:04d}.jpg", cont)
+            if self.cfg.get("output", {}).get("write_continuity_overlays", False):
+                cont = annotate_frame(
+                    fr.bgr,
+                    seg.label_map,
+                    seg.field_mask,
+                    zones if field_detected else [],
+                    fr.timestamp_sec,
+                    self.cfg,
+                    structural=sres,
+                    overlay_mode="continuity",
+                )
+                write_image(overlays_dir / f"continuity_{fr.index:04d}.jpg", cont)
 
         ann_path = None
         if self.cfg.get("output", {}).get("write_annotated_video", True):

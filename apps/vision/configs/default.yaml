@@ -96,6 +96,13 @@ output:
   write_heatmap: true
   write_frames: true
   write_metrics: true
+  # "continuity" overlays (overlays/continuity_NNNN.jpg) are a second full
+  # per-observation rendered JPEG that nothing in the product (frontend
+  # FrameReview.vue, the /frames API route, exports) actually reads --
+  # audited 2026-09-02 (storage integration campaign Phase 16). Off by
+  # default: real storage/CPU waste with zero product value found via grep,
+  # not assumption. Flip on only for manual debugging of continuity scoring.
+  write_continuity_overlays: false
   jpeg_quality: 85
 
 runtime:
