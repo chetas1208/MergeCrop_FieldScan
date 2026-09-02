@@ -12,6 +12,7 @@ from cropmerge.anomaly.grid import GridCell
 from cropmerge.anomaly.spatial import score_frame
 from cropmerge.anomaly.structural import StructuralFrameResult, score_structural_cells
 from cropmerge.features.management_units import UnitSegmentationResult, segment_management_units
+from cropmerge.features.unit_row_geometry import analyze_management_unit_rows
 
 
 def analyze_single_frame(
@@ -43,10 +44,15 @@ def analyze_single_frame(
 
     mucfg = cfg.get("management_units", {})
     management_result: UnitSegmentationResult | None = None
+    unit_row_angles: dict[int, float] = {}
     if mucfg.get("enabled", True):
         management_result = _compute_management_units(bgr, field_mask, label_map, rows, cols, mucfg)
+        if management_result is not None and crop_mask is not None:
+            unit_row_angles = _compute_unit_row_angles(crop_mask, field_mask, management_result)
 
-    cells, sres = score_structural_cells(cells, bgr, field_mask, label_map, crop_mask, cfg, management_result)
+    cells, sres = score_structural_cells(
+        cells, bgr, field_mask, label_map, crop_mask, cfg, management_result, unit_row_angles
+    )
 
     if management_result is not None:
         _stamp_cell_unit_types(cells, management_result)
@@ -90,6 +96,28 @@ def _compute_management_units(
         )
     except Exception:
         return None
+
+
+def _compute_unit_row_angles(
+    crop_mask: np.ndarray,
+    field_mask: np.ndarray,
+    management_result: UnitSegmentationResult,
+) -> dict[int, float]:
+    """Per-unit dominant row angle, ACTIVE_CROP units only (see
+    cropmerge.features.unit_row_geometry's own gating) -- used by
+    score_structural_cells to sample gap continuity along the CORRECT row
+    direction for each unit instead of one blended whole-frame angle. Never
+    raises: a failure here just means no unit gets a per-unit angle, and
+    every cell falls back to the whole-frame angle exactly as before."""
+    try:
+        row_results = analyze_management_unit_rows(crop_mask, field_mask, management_result)
+    except Exception:
+        return {}
+    return {
+        r.unit_id: r.row_geometry.dominant_angle_deg
+        for r in row_results
+        if r.row_geometry is not None and r.row_geometry.dominant_angle_deg is not None
+    }
 
 
 def _stamp_cell_unit_types(cells: list[GridCell], result: UnitSegmentationResult) -> None:

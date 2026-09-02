@@ -251,6 +251,19 @@ def detect_structural_frame(
     )
 
 
+def _cell_management_unit_id(cell: GridCell, management_units: UnitSegmentationResult | None) -> int | None:
+    """Raw unit id for a cell's grid position, or None if unavailable/out of
+    range/unassigned (-1). No confidence/type filtering here -- callers that
+    need that (e.g. _local_unit_baselines) filter on top of this."""
+    if management_units is None or cell.row >= len(management_units.cell_unit_ids):
+        return None
+    row_ids = management_units.cell_unit_ids[cell.row]
+    if cell.col >= len(row_ids):
+        return None
+    uid = row_ids[cell.col]
+    return uid if uid != -1 else None
+
+
 def _local_unit_baselines(
     cells: list[GridCell],
     occ: np.ndarray,
@@ -305,6 +318,7 @@ def score_structural_cells(
     crop_mask: np.ndarray | None,
     cfg: dict,
     management_units: UnitSegmentationResult | None = None,
+    unit_row_angles: dict[int, float] | None = None,
 ) -> tuple[list[GridCell], StructuralFrameResult]:
     """Attach structural scores + features to grid cells.
 
@@ -315,6 +329,15 @@ def score_structural_cells(
     at the baseline arithmetic level (not just the zone-label level
     classify_zone_type() already gates), a healthy crop block sitting next
     to a harvested residue block dragging the whole-field baseline down.
+
+    unit_row_angles (unit_id -> dominant_angle_deg, from
+    cropmerge.features.unit_row_geometry.analyze_management_unit_rows),
+    when provided, makes gap-continuity sampling use THAT unit's own
+    detected row angle instead of the single whole-frame angle -- and,
+    since a unit only appears in this dict when its own row geometry was
+    confidently detected, a cell inside it samples for gap continuity even
+    if the frame's overall row_visibility is LOW (e.g. dragged down by a
+    residue block with no rows at all).
     """
     scfg = cfg.get("structural", {})
     w_occ = float(scfg.get("weights", {}).get("occupancy_deficit", 0.30))
@@ -369,10 +392,16 @@ def score_structural_cells(
 
         continuity = 0.0
         gap_extent = gap_val
-        if result.row_angle_deg is not None and result.row_visibility != "LOW":
+        unit_id = _cell_management_unit_id(cell, management_units)
+        unit_angle = unit_row_angles.get(unit_id) if unit_row_angles and unit_id is not None else None
+        if unit_angle is not None:
+            cell_angle, angle_visible = unit_angle, True
+        else:
+            cell_angle, angle_visible = result.row_angle_deg, result.row_visibility != "LOW"
+        if cell_angle is not None and angle_visible:
             cx = (cell.x0 + cell.x1) / 2
             cy = (cell.y0 + cell.y1) / 2
-            profile = _sample_along_row(occ, cx, cy, result.row_angle_deg, length=max(h, w) // 16)
+            profile = _sample_along_row(occ, cx, cy, cell_angle, length=max(h, w) // 16)
             gs, before, after = _gap_score_along_row(profile)
             continuity = gs
             gap_extent = max(gap_extent, gs)
