@@ -204,6 +204,24 @@ def test_extract_member_bytes_returns_correct_content():
     assert extracted == content
 
 
+def test_inspect_zip_accepts_a_path_not_just_bytes(tmp_path):
+    """Large uploads should be streamed to a temp file rather than held
+    fully in memory (see api/main.py's collection upload endpoint) --
+    inspect_zip()/extract_member_bytes() must work directly against a Path,
+    not require the caller to read it into memory first."""
+    zip_bytes = _make_zip({"a.jpg": _fake_jpeg_bytes(300)})
+    zip_path = tmp_path / "upload.zip"
+    zip_path.write_bytes(zip_bytes)
+
+    result = inspect_zip(zip_path)
+
+    assert result.archive_rejected is None
+    assert len(result.accepted) == 1
+
+    extracted = extract_member_bytes(zip_path, result.accepted[0], ZipLimits())
+    assert extracted == _fake_jpeg_bytes(300)
+
+
 def test_extract_member_bytes_enforces_size_bound_even_if_declared_size_lied():
     """Defense in depth: even if a member's declared uncompressed_size in
     the central directory understates reality (a known zip-bomb evasion),

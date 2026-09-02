@@ -36,9 +36,11 @@ from cropmerge.pipeline.schemas import ANALYSIS_VERSION, FieldTriageReport
 from cropmerge.storage.analysis_cache import AnalysisCache, compute_cache_key, config_content_hash
 from cropmerge.segmentation.sam3 import sam3_available
 from cropmerge.storage.blob_store import BlobStore
+from cropmerge.storage.collection_manifest import CollectionIngestResult, ingest_zip_collection
 from cropmerge.storage.manifest import Manifest
 from cropmerge.storage.materialize import materialize_source
 from cropmerge.storage.policies import StorageClass
+from cropmerge.storage.zip_collection import ZipLimits
 
 try:
     from cropmerge.features.dinov2 import dinov2_available
@@ -180,6 +182,15 @@ def _valid_job_id(job_id: str) -> str:
     if not JOB_ID_RE.fullmatch(job_id):
         raise HTTPException(status_code=400, detail="Invalid analysis ID")
     return job_id
+
+
+COLLECTION_ID_RE = re.compile(r"^[a-f0-9]{12}$")
+
+
+def _valid_collection_id(collection_id: str) -> str:
+    if not COLLECTION_ID_RE.fullmatch(collection_id):
+        raise HTTPException(status_code=400, detail="Invalid collection ID")
+    return collection_id
 
 
 def _safe_artifact_path(run_id: str, name: str) -> Path:
@@ -851,6 +862,105 @@ def _storage() -> Manifest:
     return _storage_manifest
 
 
+def _collection_record_path(collection_id: str) -> Path:
+    return settings().data_dir / "collections" / f"{collection_id}.json"
+
+
+def _collection_images_payload(result: CollectionIngestResult) -> dict[str, Any]:
+    return {
+        "collectionId": result.collection_id,
+        "images": [
+            {
+                "id": img.id,
+                "archivePath": img.archive_path,
+                "relativeGroup": img.relative_group,
+                "sourceSha256": img.source_sha256,
+                "sizeBytes": img.size_bytes,
+                "status": img.status,
+                "duplicateOf": img.duplicate_of,
+                "error": img.error,
+            }
+            for img in result.images
+        ],
+        "rejectedMembers": [{"name": r.name, "reason": r.reason} for r in result.rejected],
+        "createdAt": _now(),
+    }
+
+
+def _write_collection_record(result: CollectionIngestResult) -> None:
+    path = _collection_record_path(result.collection_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _collection_images_payload(result)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        handle.write(json.dumps(payload, indent=2))
+        temp = Path(handle.name)
+    temp.replace(path)
+
+
+def _read_collection_record(collection_id: str) -> dict[str, Any]:
+    path = _collection_record_path(collection_id)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Collection not found")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Collection metadata is unreadable") from exc
+
+
+def _public_collection(source: "CollectionIngestResult | dict[str, Any]") -> dict[str, Any]:
+    """Accepts either a freshly created CollectionIngestResult or the
+    persisted dict re-read from disk and emits the same camelCase API shape
+    (a summary computed on top of whichever payload shape was given)."""
+    payload = _collection_images_payload(source) if isinstance(source, CollectionIngestResult) else source
+    images = payload["images"]
+    rejected = payload["rejectedMembers"]
+    groups = sorted({img["relativeGroup"] for img in images if img["relativeGroup"]})
+    return {
+        "collectionId": payload["collectionId"],
+        "images": images,
+        "rejectedMembers": rejected,
+        "createdAt": payload.get("createdAt"),
+        "summary": {
+            "totalImages": len(images),
+            "validImages": sum(1 for img in images if img["status"] == "valid"),
+            "duplicateImages": sum(1 for img in images if img["status"] == "duplicate"),
+            "failedImages": sum(1 for img in images if img["status"] == "failed"),
+            "rejectedMemberCount": len(rejected),
+            "groups": groups,
+        },
+    }
+
+
+async def _ingest_collection_upload(file: UploadFile) -> CollectionIngestResult:
+    """Stream the uploaded ZIP to a bounded temp file (never fully into
+    memory) and hand it to ingest_zip_collection() -- see
+    cropmerge/storage/zip_collection.py for why streaming-to-disk matters
+    for a potentially large, untrusted archive. The temp file is removed
+    once ingestion completes; the archive's actual content now lives in the
+    content-addressed store, keyed by the collection's own manifest
+    entries, not by this temp file.
+    """
+    limits = ZipLimits()
+    collection_id = uuid.uuid4().hex[:12]
+    tmp_dir = settings().data_dir / "tmp" / "collection-uploads"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = tmp_dir / f"{collection_id}.zip"
+    try:
+        written = 0
+        with tmp_path.open("wb") as handle:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > limits.max_zip_bytes:
+                    raise HTTPException(status_code=413, detail=f"Archive exceeds {limits.max_zip_bytes} bytes")
+                handle.write(chunk)
+        return ingest_zip_collection(tmp_path, _storage(), collection_id=collection_id, limits=limits)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 _JPEG_SUFFIXES = {".jpg", ".jpeg"}
 
 
@@ -1174,6 +1284,19 @@ def create_app() -> FastAPI:
         _no_store(response)
         _manager().uploads.cancel(upload_id)
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+    @app.post("/vision/collections", status_code=201)
+    async def create_collection(response: Response, _: SessionClaims, file: UploadFile = File(...)):
+        _no_store(response)
+        result = await _ingest_collection_upload(file)
+        if result.archive_rejected is not None:
+            raise HTTPException(status_code=400, detail=result.archive_rejected)
+        _write_collection_record(result)
+        return _public_collection(result)
+
+    @app.get("/vision/collections/{collection_id}")
+    def get_collection(collection_id: str, _: SessionClaims):
+        return _public_collection(_read_collection_record(_valid_collection_id(collection_id)))
 
     @app.post("/vision/analyses", status_code=202)
     def create_analysis(body: AnalysisRequest, request: Request, response: Response, _: SessionClaims):

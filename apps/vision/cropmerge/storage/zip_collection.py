@@ -32,7 +32,7 @@ import io
 import logging
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 log = logging.getLogger("cropmerge.storage.zip_collection")
 
@@ -114,22 +114,36 @@ def _relative_group(name: str) -> str | None:
     return parts[0] if len(parts) > 1 else None
 
 
+def _archive_size(source: bytes | io.BytesIO | Path) -> int:
+    if isinstance(source, Path):
+        return source.stat().st_size
+    if isinstance(source, io.BytesIO):
+        return source.getbuffer().nbytes
+    return len(source)
+
+
 def inspect_zip(
-    zip_bytes: bytes | io.BytesIO,
+    zip_source: bytes | io.BytesIO | Path,
     limits: ZipLimits | None = None,
 ) -> ZipInspectionResult:
     """Inspect every member of an uploaded ZIP archive WITHOUT extracting
     any file content, and classify each as accepted or rejected. Never
     raises on a malformed/malicious archive -- a bad archive is reported as
     `archive_rejected`, not an exception the caller has to handle specially.
+
+    `zip_source` may be raw bytes, a BytesIO, or a Path to an already-spooled
+    temp file on disk -- large uploads should be streamed to a temp file by
+    the caller (see api/main.py's collection upload endpoint) rather than
+    held fully in memory; this function opens a Path directly via
+    zipfile.ZipFile without reading it into memory itself.
     """
     limits = limits or ZipLimits()
-    buf = zip_bytes if isinstance(zip_bytes, io.BytesIO) else io.BytesIO(zip_bytes)
-    archive_size = buf.getbuffer().nbytes if hasattr(buf, "getbuffer") else len(zip_bytes)  # type: ignore[arg-type]
+    archive_size = _archive_size(zip_source)
 
     if archive_size > limits.max_zip_bytes:
         return ZipInspectionResult(archive_rejected=f"archive exceeds {limits.max_zip_bytes} bytes")
 
+    buf = io.BytesIO(zip_source) if isinstance(zip_source, bytes) else zip_source
     try:
         zf = zipfile.ZipFile(buf)
         infos = zf.infolist()
@@ -200,7 +214,9 @@ def inspect_zip(
     return result
 
 
-def extract_member_bytes(zip_bytes: bytes | io.BytesIO, member: AcceptedMember, limits: ZipLimits) -> bytes:
+def extract_member_bytes(
+    zip_source: bytes | io.BytesIO | Path, member: AcceptedMember, limits: ZipLimits
+) -> bytes:
     """Read one already-inspected, already-accepted member's content into
     memory (bounded by limits.max_member_bytes, already enforced during
     inspect_zip()) and return the raw bytes. The caller is expected to
@@ -208,7 +224,7 @@ def extract_member_bytes(zip_bytes: bytes | io.BytesIO, member: AcceptedMember, 
     (see cropmerge/storage/blob_store.py) -- this function never writes to
     any filesystem path derived from the archive's own member name.
     """
-    buf = zip_bytes if isinstance(zip_bytes, io.BytesIO) else io.BytesIO(zip_bytes)
+    buf = io.BytesIO(zip_source) if isinstance(zip_source, bytes) else zip_source
     with zipfile.ZipFile(buf) as zf:
         with zf.open(member.archive_path) as f:
             data = f.read(limits.max_member_bytes + 1)

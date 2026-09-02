@@ -23,6 +23,7 @@ import io
 import logging
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from cropmerge.storage.manifest import Manifest
 from cropmerge.storage.policies import StorageClass
@@ -65,7 +66,7 @@ class CollectionIngestResult:
 
 
 def ingest_zip_collection(
-    zip_bytes: bytes,
+    zip_bytes: bytes | io.BytesIO | Path,
     manifest: Manifest,
     *,
     collection_id: str | None = None,
