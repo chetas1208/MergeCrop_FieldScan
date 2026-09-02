@@ -62,6 +62,8 @@ data/uploads/**
 !data/uploads/.gitkeep
 data/raw/**
 !data/raw/.gitkeep
+data/blobs/**
+!data/blobs/.gitkeep
 apps/web/.data/
 uploads/
 *.sqlite
