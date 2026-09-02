@@ -32,6 +32,7 @@ from cropmerge.enrich.llm_explain import llm_enrichment_enabled, summarize_zone
 from cropmerge.enrich.llm_explain import unload as unload_llm
 from cropmerge.live.router import create_live_router
 from cropmerge.pipeline.processor import FieldTriageProcessor
+from cropmerge.pipeline.schemas import FieldTriageReport
 from cropmerge.segmentation.sam3 import sam3_available
 from cropmerge.storage.blob_store import BlobStore
 from cropmerge.storage.manifest import Manifest
@@ -659,6 +660,7 @@ class JobManager:
             self.jobs.update(job_id, status="rendering", progress=0.95, stage="rendering", message="Finalizing artifacts")
             safe_report = _public_report(report)
             _safe_artifact_path(job_id, "results.json").write_text(json.dumps(safe_report, indent=2), encoding="utf-8")
+            _register_run_artifacts_in_cas(job_id, report_model)
             self.jobs.update(
                 job_id,
                 status="completed",
@@ -817,6 +819,35 @@ def _try_archive_jpeg_reversible(record: "UploadRecord") -> None:
     finally:
         if jxl_tmp_path is not None:
             jxl_tmp_path.unlink(missing_ok=True)
+
+
+def _register_run_artifacts_in_cas(job_id: str, report_model: FieldTriageReport) -> None:
+    """Phase 10 of the storage integration campaign: register only the
+    STABLE final artifacts (results.json, metrics.json, the annotated
+    review video, the heatmap preview) into the same content-addressed
+    store uploads use — never per-frame/debug intermediates (frames_dir,
+    overlays_dir stay ordinary temp/output files, unregistered, per the
+    campaign's "start with source uploads, then only stable final
+    artifacts" instruction). Non-fatal: a completed analysis must never be
+    put at risk by a storage bookkeeping failure.
+    """
+    candidates: list[tuple[str, str | None, StorageClass]] = [
+        ("results.json", str(_safe_artifact_path(job_id, "results.json")), StorageClass.DERIVED_ANALYSIS),
+        ("metrics.json", report_model.artifacts.metrics_json, StorageClass.DERIVED_ANALYSIS),
+        ("annotated_video", report_model.artifacts.annotated_video, StorageClass.DERIVED_PREVIEW),
+        ("heatmap.png", report_model.artifacts.heatmap_png, StorageClass.DERIVED_PREVIEW),
+    ]
+    for name, path_str, storage_class in candidates:
+        if not path_str:
+            continue
+        path = Path(path_str)
+        if not path.is_file():
+            continue
+        try:
+            blob_ref = _storage().blob_store.put(path)
+            _storage().add(f"run:{job_id}:{name}", blob_ref, storage_class=storage_class.value)
+        except Exception:
+            log.exception("Artifact CAS registration failed for run=%s artifact=%s (artifact itself is unaffected)", job_id, name)
 
 
 def _torch_ok() -> bool:
