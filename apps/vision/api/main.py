@@ -36,6 +36,7 @@ from cropmerge.pipeline.schemas import FieldTriageReport
 from cropmerge.segmentation.sam3 import sam3_available
 from cropmerge.storage.blob_store import BlobStore
 from cropmerge.storage.manifest import Manifest
+from cropmerge.storage.materialize import materialize_source
 from cropmerge.storage.policies import StorageClass
 
 try:
@@ -637,8 +638,9 @@ class JobManager:
                 raise RuntimeError("Completed upload is unavailable")
             self.jobs.update(job_id, status="processing", progress=0.1, stage="processing", message="Running vision pipeline")
             options = job["options"]
+            input_path = _materialize_upload_source(upload)
             report_model = FieldTriageProcessor(load_config()).process(
-                upload.completed_path,
+                input_path,
                 self.cfg.output_dir,
                 sample_fps=float(options["sample_fps"]),
                 # None means "cover the whole video" — sample_frames() already
@@ -819,6 +821,27 @@ def _try_archive_jpeg_reversible(record: "UploadRecord") -> None:
     finally:
         if jxl_tmp_path is not None:
             jxl_tmp_path.unlink(missing_ok=True)
+
+
+def _materialize_upload_source(upload: "UploadRecord") -> Path:
+    """Phase 9 of the storage integration campaign: analysis reads through
+    the storage abstraction instead of reaching for completed_path
+    directly. In this integration round the only registered source class is
+    SCIENTIFIC_SOURCE (a byte-identical CAS copy of the exact same upload —
+    see _register_upload_blob), so this changes WHERE the bytes are read
+    from, never WHAT bytes are read; a materialization miss/failure falls
+    back to upload.completed_path unconditionally (materialize_source()
+    itself never raises). This is the one seam a later storage
+    representation change (e.g. serving a verified reversible JXL archive
+    instead) would need to touch, not every analysis call site.
+    """
+    fallback = Path(upload.completed_path)
+    try:
+        work_dir = settings().data_dir / "tmp" / "materialized-sources"
+        return materialize_source(_storage(), f"upload:{upload.id}", fallback, work_dir, suffix=upload.suffix)
+    except Exception:
+        log.exception("Source materialization failed for upload=%s, using completed_path directly", upload.id)
+        return fallback
 
 
 def _register_run_artifacts_in_cas(job_id: str, report_model: FieldTriageReport) -> None:
