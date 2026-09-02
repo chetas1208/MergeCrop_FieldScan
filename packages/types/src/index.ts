@@ -108,6 +108,36 @@ export interface FieldBoundaryInfo {
   tooltip?: string
 }
 
+export type FarmTechObservabilityMode = 'PLANT_RESOLVABLE' | 'ROW_RESOLVABLE' | 'CANOPY_ONLY'
+
+export interface FarmTechVegetation {
+  exgMean: number
+  variMean: number
+}
+
+export interface FarmTechRowGeometry {
+  method: string
+  orientationDeg?: number | null
+  coherence: number
+  rowCount: number
+  supportPx: number
+}
+
+export interface FarmTechStructure {
+  cropOccupancy: number
+  soilFraction: number
+  fragmentation: number
+}
+
+/** Shadow-only per-observation FarmTech evidence — recorded for review, not
+ * yet authoritative. Never shown prominently in primary farmer UI copy. */
+export interface FarmTechObservation {
+  mode: FarmTechObservabilityMode
+  vegetation: FarmTechVegetation
+  rowGeometry?: FarmTechRowGeometry | null
+  structure: FarmTechStructure
+}
+
 export interface FrameQuality {
   frameIndex: number
   timestampSec: number
@@ -119,6 +149,7 @@ export interface FrameQuality {
   usable: boolean
   qualityWeight: number
   warnings: string[]
+  farmTech?: FarmTechObservation | null
 }
 
 export interface VideoSourceMeta {

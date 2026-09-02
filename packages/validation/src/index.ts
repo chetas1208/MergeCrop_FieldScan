@@ -100,6 +100,38 @@ export const fieldBoundaryInfoSchema = z.object({
   tooltip: z.string().optional(),
 })
 
+export const farmTechObservabilityModeSchema = z.enum([
+  'PLANT_RESOLVABLE',
+  'ROW_RESOLVABLE',
+  'CANOPY_ONLY',
+])
+
+export const farmTechVegetationSchema = z.object({
+  exgMean: z.number(),
+  variMean: z.number(),
+})
+
+export const farmTechRowGeometrySchema = z.object({
+  method: z.string(),
+  orientationDeg: z.number().nullish(),
+  coherence: z.number(),
+  rowCount: z.number().int(),
+  supportPx: z.number(),
+})
+
+export const farmTechStructureSchema = z.object({
+  cropOccupancy: z.number(),
+  soilFraction: z.number(),
+  fragmentation: z.number(),
+})
+
+export const farmTechObservationSchema = z.object({
+  mode: farmTechObservabilityModeSchema,
+  vegetation: farmTechVegetationSchema,
+  rowGeometry: farmTechRowGeometrySchema.nullish(),
+  structure: farmTechStructureSchema,
+})
+
 export const frameQualitySchema = z.object({
   frameIndex: z.number().int(),
   timestampSec: z.number(),
@@ -111,6 +143,7 @@ export const frameQualitySchema = z.object({
   usable: z.boolean(),
   qualityWeight: z.number(),
   warnings: z.array(z.string()),
+  farmTech: farmTechObservationSchema.nullish(),
 })
 
 export const videoSourceMetaSchema = z.object({

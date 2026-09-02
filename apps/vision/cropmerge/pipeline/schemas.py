@@ -122,6 +122,48 @@ class FieldSummary(BaseModel):
     row_visibility: str = "LOW"
 
 
+class FarmTechVegetation(BaseModel):
+    """Chromatic vegetation-evidence indices — never health/NDVI, see
+    docs/FARMTECH_RESEARCH_BASIS.md."""
+
+    exg_mean: float
+    vari_mean: float
+
+
+class FarmTechRowGeometry(BaseModel):
+    """Row-structure diagnostic from cropmerge/features/row_geometry.py.
+    method reports which thinning implementation actually ran ("guo_hall"
+    or "zhang_suen_fallback") — never hidden, see FARMTECH_RESEARCH_BASIS.md."""
+
+    method: str
+    orientation_deg: float | None
+    coherence: float
+    row_count: int
+    support_px: float
+
+
+class FarmTechStructure(BaseModel):
+    crop_occupancy: float
+    soil_fraction: float
+    fragmentation: float
+
+
+class FarmTechObservation(BaseModel):
+    """Shadow-only FarmTech measurements for one 1 FPS observation — see
+    cropmerge/pipeline/farmtech_shadow.py. Gated by CROP_MERGE_FARMTECH_SHADOW
+    (default off). Computed and recorded for review, but MUST NEVER be used
+    to alter an InspectionZone's type/priority/score/ranking — this campaign
+    round only records evidence, it does not yet activate it. `mode` is the
+    observability tier (cropmerge/features/observability.py) that gates
+    which claims the imagery actually supports; spacing metrics are omitted
+    entirely (no plant detector exists yet, see FARMTECH_RESEARCH_BASIS.md)."""
+
+    mode: str  # "PLANT_RESOLVABLE" | "ROW_RESOLVABLE" | "CANOPY_ONLY"
+    vegetation: FarmTechVegetation
+    row_geometry: FarmTechRowGeometry | None = None
+    structure: FarmTechStructure
+
+
 class FrameQuality(BaseModel):
     frame_index: int
     timestamp_sec: float
@@ -133,6 +175,7 @@ class FrameQuality(BaseModel):
     usable: bool
     quality_weight: float
     warnings: list[str] = Field(default_factory=list)
+    farm_tech: FarmTechObservation | None = None
 
 
 class VideoSourceMeta(BaseModel):
@@ -215,6 +258,36 @@ def zone_to_camel_dict(z: InspectionZone) -> dict[str, Any]:
         },
         "reasons": z.reasons,
         "recommendation": z.recommendation,
+    }
+
+
+def farm_tech_to_camel_dict(ft: FarmTechObservation | None) -> dict[str, Any] | None:
+    """Emit TS-contract keys for one observation's shadow FarmTech block, or
+    None when shadow computation is disabled/unavailable for this frame."""
+    if ft is None:
+        return None
+    return {
+        "mode": ft.mode,
+        "vegetation": {
+            "exgMean": ft.vegetation.exg_mean,
+            "variMean": ft.vegetation.vari_mean,
+        },
+        "rowGeometry": (
+            {
+                "method": ft.row_geometry.method,
+                "orientationDeg": ft.row_geometry.orientation_deg,
+                "coherence": ft.row_geometry.coherence,
+                "rowCount": ft.row_geometry.row_count,
+                "supportPx": ft.row_geometry.support_px,
+            }
+            if ft.row_geometry is not None
+            else None
+        ),
+        "structure": {
+            "cropOccupancy": ft.structure.crop_occupancy,
+            "soilFraction": ft.structure.soil_fraction,
+            "fragmentation": ft.structure.fragmentation,
+        },
     }
 
 
@@ -347,6 +420,7 @@ class FieldTriageReport(BaseModel):
                     "usable": q.usable,
                     "qualityWeight": q.quality_weight,
                     "warnings": q.warnings,
+                    "farmTech": farm_tech_to_camel_dict(q.farm_tech),
                 }
                 for q in self.frame_quality
             ],

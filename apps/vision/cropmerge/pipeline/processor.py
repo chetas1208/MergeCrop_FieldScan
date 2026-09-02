@@ -15,6 +15,7 @@ from cropmerge import DEFAULT_LIMITATIONS, DISCLAIMER
 from cropmerge.anomaly.temporal import aggregate_zones
 from cropmerge.config import load_config
 from cropmerge.features.dinov3 import create_embedder
+from cropmerge.pipeline.farmtech_shadow import compute_farmtech_observation
 from cropmerge.pipeline.frame_analysis import analyze_single_frame
 from cropmerge.pipeline.summary import build_field_analysis_summary
 from cropmerge.pipeline.schemas import (
@@ -150,6 +151,11 @@ class FieldTriageProcessor:
         actual_dino = "skipped" if skip_dino else embedder.name
         log.info("Embedding backend=%s", actual_dino)
 
+        farmtech_shadow_enabled = str(os.environ.get("CROP_MERGE_FARMTECH_SHADOW", "")).lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         frame_cells = []
         heats = []
         qweights = []
@@ -176,6 +182,15 @@ class FieldTriageProcessor:
             frame_cells.append(cells)
             heats.append(heat)
             qweights.append(qw)
+
+            # Shadow-only FarmTech measurements (see farmtech_shadow.py's
+            # module docstring): recorded per observation, never allowed to
+            # influence the zones/cells computed above. Default off.
+            if farmtech_shadow_enabled:
+                soil_fraction = class_fractions(label).get("BARE_SOIL", 0.0)
+                q.farm_tech = compute_farmtech_observation(
+                    fr.bgr, field, seg.crop_mask, soil_fraction, sres.occupancy, sres.fragmentation_mask,
+                )
         latency["feature_anomaly"] = time.perf_counter() - t
 
         # --- temporal consensus → inspection zones ---
