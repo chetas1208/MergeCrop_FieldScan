@@ -25,7 +25,7 @@ class HeuristicSegmenter(Segmenter):
         r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
         exg = 2 * g - r - b
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-        hch, sch, vch = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+        sch, vch = hsv[:, :, 1], hsv[:, :, 2]
         gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
 
         crop = (exg > 0.05) & (g > r) & (g > b * 0.9) & (vch > 30)

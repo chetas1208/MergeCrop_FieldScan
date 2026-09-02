@@ -29,6 +29,7 @@ from cropmerge.features.dinov3 import dinov3_available
 from cropmerge.logging_utils import setup_access_logging, setup_logging
 from cropmerge.enrich.llm_explain import health_status as llm_health_status
 from cropmerge.enrich.llm_explain import llm_enrichment_enabled, summarize_zone
+from cropmerge.enrich.llm_explain import unload as unload_llm
 from cropmerge.live.router import create_live_router
 from cropmerge.pipeline.processor import FieldTriageProcessor
 from cropmerge.segmentation.sam3 import sam3_available
@@ -642,6 +643,7 @@ class JobManager:
                 dino_backend=str(options["dino_backend"]),
                 run_id=job_id,
             ).to_camel_dict()
+            _release_gpu_cache()
             self.jobs.update(job_id, status="rendering", progress=0.95, stage="rendering", message="Finalizing artifacts")
             safe_report = _public_report(report)
             _safe_artifact_path(job_id, "results.json").write_text(json.dumps(safe_report, indent=2), encoding="utf-8")
@@ -679,6 +681,10 @@ class JobManager:
             _safe_artifact_path(job_id, "results.json").write_text(json.dumps(safe_report, indent=2), encoding="utf-8")
         except Exception:
             log.exception("Background LLM enrichment failed for job=%s", job_id)
+        finally:
+            # Unload even on failure — a shared-GPU host must not keep the
+            # model resident just because this batch errored partway through.
+            unload_llm()
 
     def _fail_job(self, job_id: str, exc: Exception) -> None:
         self.jobs.update(
@@ -750,6 +756,26 @@ def _gpu_memory_ok() -> tuple[bool, str | None]:
         return True, None
     except Exception:
         return True, None
+
+
+def _release_gpu_cache() -> None:
+    """Called after every job (recorded-mode SAM2/DINOv2 inference is not
+    kept resident between jobs — each job creates fresh segmenter/embedder
+    instances). PyTorch's caching allocator keeps freed tensor memory in a
+    pool for reuse rather than returning it to the OS, so nvidia-smi shows
+    it as still "used" until this runs — this is what nvidia-smi-measured
+    idle VRAM is actually seeing, not a real leak.
+    """
+    try:
+        import gc
+
+        import torch
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        log.exception("GPU cache release failed (non-fatal)")
 
 
 def _max_queue_depth() -> int:

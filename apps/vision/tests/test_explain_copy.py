@@ -1,4 +1,4 @@
-from cropmerge.anomaly.explain import combined_review_score, explain_cell, recommendation, review_priority
+from cropmerge.anomaly.explain import combined_review_score, explain_cell, recommendation
 from cropmerge.anomaly.grid import GridCell
 
 

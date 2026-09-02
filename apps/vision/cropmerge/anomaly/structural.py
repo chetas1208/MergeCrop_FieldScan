@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from cropmerge.anomaly.grid import GridCell, build_grid
+from cropmerge.anomaly.grid import GridCell
 from cropmerge.features.rgb_indices import excess_green, vegetation_mask
 from cropmerge.pipeline.schemas import SemanticClass
 

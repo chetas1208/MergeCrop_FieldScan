@@ -5,11 +5,10 @@ import logging
 import os
 import subprocess
 import threading
-import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 
 from api.auth import SessionClaims, decode_session_token
 from cropmerge.config import load_config

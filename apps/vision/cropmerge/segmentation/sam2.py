@@ -160,7 +160,6 @@ class SAM2Segmenter(Segmenter):
             mask = mask.astype(bool)
             if mask.shape[:2] != (h, w) or not np.any(mask):
                 continue
-            conf = float(m.get("predicted_iou", m.get("stability_score", 0.7)))
             ex = float(np.mean(exg[mask]))
             sat = float(np.mean(hsv[:, :, 1][mask]))
             val = float(np.mean(hsv[:, :, 2][mask]))

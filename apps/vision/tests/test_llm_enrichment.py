@@ -1,5 +1,11 @@
 from api.main import _enrich_zones_with_llm
-from cropmerge.enrich.llm_explain import llm_enrichment_enabled, summarize_zone
+from cropmerge.enrich.llm_explain import is_loaded, llm_enrichment_enabled, summarize_zone, unload
+
+
+def test_unload_is_safe_when_nothing_loaded():
+    assert is_loaded() is False
+    unload()  # must not raise
+    assert is_loaded() is False
 
 
 def test_disabled_by_default(monkeypatch):

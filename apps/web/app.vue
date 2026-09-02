@@ -7,7 +7,7 @@ const health = ref<{
   vision?: { status?: string; device?: string; segmentationBackend?: string }
 } | null>(null)
 const { request } = useVisionApi()
-const { mode, isDemo, setMode, loadManifest } = useDemoMode()
+const { isDemo, setMode, loadManifest } = useDemoMode()
 
 onMounted(async () => {
   await loadManifest()

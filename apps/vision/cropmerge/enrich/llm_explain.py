@@ -121,6 +121,34 @@ def _ensure_loaded() -> bool:
             return False
 
 
+def unload() -> None:
+    """Release the model and its VRAM. Callers run this once after a job's
+    whole enrichment batch completes — trading the ~8-9s reload cost on the
+    next job for zero idle VRAM between jobs. This host is shared with other
+    workloads; a 15GB always-resident LLM process was the actual measured
+    idle-VRAM problem this addresses (see Decisions.md)."""
+    global _model, _tokenizer
+    if _model is None:
+        return
+    with _lock:
+        if _model is None:
+            return
+        try:
+            import gc
+
+            import torch
+
+            device = _model.device
+            _model = None
+            _tokenizer = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            log.info("LLM enrichment model unloaded from %s", device)
+        except Exception:
+            log.exception("LLM enrichment unload failed")
+
+
 def summarize_zone(
     *,
     primary_signal_label: str,

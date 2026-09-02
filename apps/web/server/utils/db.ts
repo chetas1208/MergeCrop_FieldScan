@@ -59,11 +59,6 @@ function initSqliteSchema(db: SqlDb) {
   }
 }
 
-export function getDbMode(): 'sqlite' | 'postgres' {
-  ensureDb()
-  return _mode || 'sqlite'
-}
-
 function ensureDb(): void {
   if (_mode) return
   const url = (useRuntimeConfig().databaseUrl as string) || process.env.DATABASE_URL || ''

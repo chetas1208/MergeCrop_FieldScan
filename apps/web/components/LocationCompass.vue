@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { RelativeLocation, ReviewPriority } from '@cropmerge/types'
 
-const props = defineProps<{
+defineProps<{
   location?: RelativeLocation | string | null
   priority?: ReviewPriority | string
 }>()

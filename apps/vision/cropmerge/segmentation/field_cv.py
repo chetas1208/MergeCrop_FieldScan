@@ -250,14 +250,6 @@ class FieldCVSegmenter(Segmenter):
                     fill = (cur_i == 0) & (warped > 0)
                     cur_i = cur_i.copy()
                     cur_i[fill] = warped[fill]
-                    # Temporal consensus on crop/soil: require agreement or strong current
-                    for cname in (SemanticClass.CROP.value, SemanticClass.BARE_SOIL.value):
-                        try:
-                            code = _CLASSES.index(cname) + 1
-                        except ValueError:
-                            continue
-                        # if warp says crop and current bare with low conf edge — keep warp on interior
-                        pass
                     seg.label_map = _decode_labels(cur_i, inv)
                     union = self.cfg.get("segmentation", {}).get(
                         "field_union_classes", ["CROP", "BARE_SOIL", "FIELD"]

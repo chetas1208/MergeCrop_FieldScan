@@ -1,5 +1,3 @@
-import numpy as np
-
 from cropmerge.eval.metrics import compare_label_maps, confusion_matrix
 from cropmerge.eval.synthetic_field import make_synthetic_labels, make_synthetic_pair
 from cropmerge.pipeline.schemas import SemanticClass

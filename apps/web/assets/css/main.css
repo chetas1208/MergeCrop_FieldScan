@@ -308,17 +308,9 @@ select {
   grid-template-columns: 1.25fr 0.75fr;
   gap: 1.15rem;
 }
-.grid-zones {
-  display: grid;
-  grid-template-columns: 1fr 1.1fr;
-  gap: 1.15rem;
-  align-items: start;
-}
-
 @media (max-width: 960px) {
   .grid-hero,
-  .grid-media,
-  .grid-zones {
+  .grid-media {
     grid-template-columns: 1fr;
   }
   .topbar {
@@ -775,26 +767,6 @@ select {
   font-size: 0.84rem;
   text-transform: capitalize;
 }
-.zone-metrics {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.55rem;
-  margin-top: 0.7rem;
-}
-.zone-metric label {
-  display: block;
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--faint);
-  margin-bottom: 0.2rem;
-}
-.zone-metric strong {
-  font-variant-numeric: tabular-nums;
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
 .zone-detail {
   position: sticky;
   top: calc(var(--header-h) + 1rem);

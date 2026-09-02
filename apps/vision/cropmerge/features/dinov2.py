@@ -64,7 +64,6 @@ class DINOv2Extractor(EmbeddingExtractor):
 
     def _load(self, ckpt: Path) -> None:
         import torch
-        import torch.nn as nn
 
         # Prefer torch.hub architecture + local weights
         try:

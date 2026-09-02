@@ -93,7 +93,6 @@ def boundary_confidence(field_mask: np.ndarray, label_map: np.ndarray | None = N
 def finalize_segmentation(seg: FrameSegmentation, cfg: dict) -> FrameSegmentation:
     if not seg.masks:
         h = seg.label_map.shape[0] if seg.label_map is not None else 0
-        w = seg.label_map.shape[1] if seg.label_map is not None else 0
         if h == 0:
             return seg
     shape = seg.masks[0].mask.shape[:2] if seg.masks else seg.label_map.shape[:2]
