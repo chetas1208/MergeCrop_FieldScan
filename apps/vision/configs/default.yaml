@@ -69,6 +69,11 @@ structural:
     soil_exposure: 0.10
   edge_exclusion_px: 12
   row_visibility_min_coherence: 0.12
+  # Opt-in Hough-line corroboration for borderline LOW row-visibility scores
+  # (see cropmerge/features/row_geometry.py + FarmTech campaign docs). Off by
+  # default -- not yet benchmarked against real field footage.
+  farmtech_hough_crosscheck_enabled: false
+  farmtech_hough_crosscheck_min_rows: 2
 
 boundary:
   min_component_frac: 0.02

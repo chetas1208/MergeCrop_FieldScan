@@ -13,6 +13,11 @@ import numpy as np
 
 from cropmerge.anomaly.grid import GridCell
 from cropmerge.features.rgb_indices import excess_green, vegetation_mask
+from cropmerge.features.row_geometry import (
+    RowGeometryConfig,
+    analyze_row_geometry,
+    structure_tensor_orientation,
+)
 from cropmerge.pipeline.schemas import SemanticClass
 
 log = logging.getLogger("cropmerge.anomaly.structural")
@@ -64,25 +69,20 @@ def build_occupancy_map(
 
 
 def _structure_tensor_orientation(occ: np.ndarray, field_mask: np.ndarray) -> tuple[float | None, float]:
-    """Dominant row direction via structure tensor on occupancy gradients."""
-    g = occ.astype(np.float32)
-    gx = cv2.Sobel(g, cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(g, cv2.CV_32F, 0, 1, ksize=3)
+    """Dominant row direction via structure tensor on occupancy gradients.
+
+    Thin wrapper: the actual formula lives once in
+    cropmerge.features.row_geometry.structure_tensor_orientation (shared with
+    the FarmTech row-geometry module, which independently implemented the
+    same math) — kept as a local guard here only to preserve this call
+    site's field_mask-sum short-circuit and its exact historical eps
+    (1e-6, vs. the shared function's own default of 1e-9), so live
+    row-visibility numbers are byte-identical to before this consolidation.
+    """
     m = field_mask.astype(np.float32)
     if m.sum() < 100:
         return None, 0.0
-
-    jxx = float(np.sum(gx * gx * m))
-    jyy = float(np.sum(gy * gy * m))
-    jxy = float(np.sum(gx * gy * m))
-    if jxx + jyy < 1e-6:
-        return None, 0.0
-
-    # Row direction is perpendicular to gradient coherence
-    angle = 0.5 * np.arctan2(2 * jxy, jxx - jyy)
-    coherence = float(np.sqrt((jxx - jyy) ** 2 + 4 * jxy**2) / (jxx + jyy + 1e-6))
-    row_angle = float(np.degrees(angle + np.pi / 2) % 180)
-    return row_angle, coherence
+    return structure_tensor_orientation(occ, m, eps=1e-6)
 
 
 def _edge_exclusion_mask(field_mask: np.ndarray, px: int) -> np.ndarray:
@@ -168,6 +168,36 @@ def _fragmentation_map(occ: np.ndarray, field_mask: np.ndarray, win: int = 15) -
     return frag.astype(np.float32)
 
 
+def _hough_crosscheck_row_visibility(
+    row_vis: str,
+    angle: float | None,
+    crop_mask: np.ndarray | None,
+    field_mask: np.ndarray,
+    min_consistent_rows: int,
+) -> tuple[str, float | None]:
+    """Opt-in corroborating check (config: structural.farmtech_hough_crosscheck_enabled,
+    default off, unbenchmarked): when the structure-tensor coherence alone
+    scored a frame "LOW", an independent Hough-line-based method
+    (cropmerge.features.row_geometry.analyze_row_geometry) may still find
+    consistent, well-supported row lines that a single aggregate coherence
+    statistic can miss (e.g. two dominant orientations partially cancelling
+    each other in the tensor sum). Only ever upgrades LOW -> MEDIUM, never
+    downgrades and never claims HIGH — this is corroboration for a
+    borderline case, not a replacement for the primary coherence signal.
+    No-op (returns inputs unchanged) when row_vis isn't "LOW" or no crop
+    mask is available to run Hough line detection on.
+    """
+    if row_vis != "LOW" or crop_mask is None:
+        return row_vis, angle
+    mask = (crop_mask.astype(bool) & field_mask.astype(bool)).astype(np.uint8)
+    if mask.sum() < 100:
+        return row_vis, angle
+    geo = analyze_row_geometry(mask, RowGeometryConfig())
+    if geo.num_consistent_rows >= min_consistent_rows:
+        return "MEDIUM", geo.dominant_angle_deg if angle is None else angle
+    return row_vis, angle
+
+
 def detect_structural_frame(
     bgr: np.ndarray,
     field_mask: np.ndarray,
@@ -178,6 +208,8 @@ def detect_structural_frame(
     scfg = cfg.get("structural", {})
     edge_px = int(scfg.get("edge_exclusion_px", 12))
     row_coherence_min = float(scfg.get("row_visibility_min_coherence", 0.12))
+    hough_crosscheck_enabled = bool(scfg.get("farmtech_hough_crosscheck_enabled", False))
+    hough_crosscheck_min_rows = int(scfg.get("farmtech_hough_crosscheck_min_rows", 2))
 
     occ = build_occupancy_map(bgr, field_mask, label_map, crop_mask)
     angle, coherence = _structure_tensor_orientation(occ, field_mask)
@@ -187,6 +219,11 @@ def detect_structural_frame(
         row_vis = "MEDIUM"
     else:
         row_vis = "LOW"
+
+    if hough_crosscheck_enabled:
+        row_vis, angle = _hough_crosscheck_row_visibility(
+            row_vis, angle, crop_mask, field_mask, hough_crosscheck_min_rows
+        )
 
     interior = _edge_exclusion_mask(field_mask, edge_px)
     frag = _fragmentation_map(occ, interior)

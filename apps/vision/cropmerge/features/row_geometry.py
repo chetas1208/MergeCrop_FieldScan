@@ -342,7 +342,7 @@ def cluster_row_lines(
 
 
 def structure_tensor_orientation(
-    image: np.ndarray, weight: np.ndarray | None = None
+    image: np.ndarray, weight: np.ndarray | None = None, eps: float = 1e-9
 ) -> tuple[float | None, float]:
     """Dominant orientation + coherence via the 2D structure tensor of image
     gradients, evaluated over an optional weight mask (e.g. the field mask).
@@ -379,7 +379,7 @@ def structure_tensor_orientation(
         return None, 0.0
 
     theta = 0.5 * np.arctan2(2 * jxy, jxx - jyy)
-    coherence = float(np.sqrt((jxx - jyy) ** 2 + 4 * jxy**2) / (jxx + jyy + 1e-9))
+    coherence = float(np.sqrt((jxx - jyy) ** 2 + 4 * jxy**2) / (jxx + jyy + eps))
     row_angle = float(np.degrees(theta + np.pi / 2) % 180.0)
     return row_angle, coherence
 
