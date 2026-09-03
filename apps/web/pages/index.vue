@@ -145,6 +145,27 @@ const displayFrameQuality = computed(() => {
   return isSingleImageReport.value ? frames.slice(0, 1) : frames
 })
 
+// Capture-location GPS (from the photo/video's own EXIF/QuickTime metadata,
+// see apps/vision/cropmerge/video/metadata.py) -- this is where the CAMERA
+// was when the shot was taken, not a per-zone ground position. A real
+// per-anomaly offset would need actual georeferencing (altitude + camera
+// FOV + gimbal angle) this pipeline doesn't compute yet (report.georeferenced
+// is always false) -- never fabricate one by guessing a ground-sample
+// distance. Surfacing the real capture point is still directly useful for
+// "walk back to this spot," which is what most single-photo field-review
+// workflows actually need.
+const captureGps = computed(() => report.value?.source?.gps ?? null)
+const hasCaptureGps = computed(
+  () => typeof captureGps.value?.latitude === 'number' && typeof captureGps.value?.longitude === 'number',
+)
+const captureGpsMapsUrl = computed(() => {
+  if (!hasCaptureGps.value) return ''
+  return `https://www.google.com/maps?q=${captureGps.value!.latitude},${captureGps.value!.longitude}`
+})
+function formatGps(coord: number): string {
+  return coord.toFixed(6)
+}
+
 const zones = computed(() => report.value?.inspectionZones ?? [])
 
 const { brief: fieldBrief, loadingLines } = useFieldBrief(report, zones)
@@ -951,6 +972,14 @@ const mediaSrc = computed(() => {
             <template v-else>{{ report.analysis.framesSampled }} frames @ {{ report.analysis.sampleFps }} FPS</template>
             · {{ report.analysis.totalRuntimeSec.toFixed(1) }}s
             · <span class="mono">{{ report.runId }}</span>
+          </p>
+          <p v-if="hasCaptureGps" class="muted" style="margin: 0.25rem 0 0">
+            📍 Capture location:
+            <a :href="captureGpsMapsUrl" target="_blank" rel="noopener" class="mono">
+              {{ formatGps(captureGps!.latitude!) }}, {{ formatGps(captureGps!.longitude!) }}
+            </a>
+            <template v-if="captureGps?.altitude != null"> · {{ Math.round(captureGps.altitude) }}m alt</template>
+            <span class="muted" style="font-size: 0.78em"> — where the photo was taken, not a per-zone position</span>
           </p>
         </div>
         <div class="row">
