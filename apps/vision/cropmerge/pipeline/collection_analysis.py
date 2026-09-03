@@ -133,7 +133,7 @@ def analyze_collection_images(
         try:
             report = FieldTriageProcessor(cfg).process(
                 img.path,
-                output_root / img.image_id,
+                output_root,
                 sample_fps=1.0,
                 max_frames=1,
                 segmentation_backend=segmentation_backend,

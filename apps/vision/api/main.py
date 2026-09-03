@@ -206,6 +206,63 @@ def _safe_artifact_path(run_id: str, name: str) -> Path:
     return path
 
 
+def _valid_image_id(image_id: str) -> str:
+    if not COLLECTION_ID_RE.fullmatch(image_id):
+        raise HTTPException(status_code=400, detail="Invalid image ID")
+    return image_id
+
+
+def _collection_image_output_dir(collection_id: str, image_id: str) -> Path:
+    return settings().output_dir / "collections" / collection_id / image_id
+
+
+def _safe_collection_image_artifact_path(collection_id: str, image_id: str, name: str) -> Path:
+    """Mirrors _safe_artifact_path's traversal protection, rooted at a
+    single collection image's own output directory (never a job's) --
+    collection images are analyzed directly via FieldTriageProcessor, not
+    through the JobManager, so they have no JobStore-backed run_id."""
+    _valid_collection_id(collection_id)
+    _valid_image_id(image_id)
+    pure_name = PurePosixPath(name)
+    if not name or pure_name.is_absolute() or any(part in {"", ".", ".."} for part in pure_name.parts):
+        raise HTTPException(status_code=400, detail="Invalid artifact path")
+    root = _collection_image_output_dir(collection_id, image_id).resolve()
+    path = (root / Path(*pure_name.parts)).resolve()
+    if path != root and root not in path.parents:
+        raise HTTPException(status_code=400, detail="Invalid artifact path")
+    return path
+
+
+def _collection_image_artifact_key(collection_id: str, image_id: str) -> str:
+    """The composite key signed into the artifact token in place of a plain
+    run_id -- _encode_artifact_token/_verify_artifact_token are pure string
+    functions with no format assumption on their first argument, so this
+    composite key reuses them unchanged."""
+    return f"collections/{collection_id}/{image_id}"
+
+
+def _existing_collection_image_artifact_names(collection_id: str, image_id: str, report: dict[str, Any]) -> list[str]:
+    names = ["results.json", "metrics.json", "heatmap.png", "segmentation_montage.jpg"]
+    for frame in report.get("frameQuality", []):
+        index = int(frame.get("frameIndex", 0))
+        names.extend((f"frames/frame_{index:04d}.jpg", f"overlays/overlay_{index:04d}.jpg"))
+    return [name for name in names if _safe_collection_image_artifact_path(collection_id, image_id, name).is_file()]
+
+
+def _collection_image_artifact_urls(
+    collection_id: str, image_id: str, report: dict[str, Any], request: Request
+) -> dict[str, str]:
+    base = _public_base(request)
+    key = _collection_image_artifact_key(collection_id, image_id)
+    return {
+        name: (
+            f"{base}/vision/collections/{collection_id}/images/{image_id}/artifacts/{name}"
+            f"?token={_encode_artifact_token(key, name)}"
+        )
+        for name in _existing_collection_image_artifact_names(collection_id, image_id, report)
+    }
+
+
 class UploadRecord(BaseModel):
     id: str
     filename: str
@@ -1414,6 +1471,30 @@ def create_app() -> FastAPI:
     @app.get("/vision/collections/{collection_id}/analysis")
     def get_collection_analysis(collection_id: str, _: SessionClaims):
         return _read_collection_analysis_record(_valid_collection_id(collection_id))
+
+    @app.get("/vision/collections/{collection_id}/images/{image_id}")
+    def get_collection_image(
+        collection_id: str, image_id: str, request: Request, response: Response, _: SessionClaims
+    ):
+        _no_store(response)
+        cid = _valid_collection_id(collection_id)
+        iid = _valid_image_id(image_id)
+        results_path = _collection_image_output_dir(cid, iid) / "results.json"
+        if not results_path.is_file():
+            raise HTTPException(status_code=404, detail="No analysis found for this image")
+        report = json.loads(results_path.read_text(encoding="utf-8"))
+        safe = _public_report(report)
+        return {**safe, "artifactUrls": _collection_image_artifact_urls(cid, iid, safe, request)}
+
+    @app.get("/vision/collections/{collection_id}/images/{image_id}/artifacts/{name:path}")
+    def get_collection_image_artifact(collection_id: str, image_id: str, name: str, token: str):
+        cid = _valid_collection_id(collection_id)
+        iid = _valid_image_id(image_id)
+        _verify_artifact_token(token, _collection_image_artifact_key(cid, iid), name)
+        path = _safe_collection_image_artifact_path(cid, iid, name)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        return FileResponse(path, headers={"Cache-Control": "private, no-store", "Accept-Ranges": "bytes"})
 
     @app.post("/vision/analyses", status_code=202)
     def create_analysis(body: AnalysisRequest, request: Request, response: Response, _: SessionClaims):

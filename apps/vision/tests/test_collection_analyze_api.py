@@ -106,3 +106,94 @@ def test_analyze_unknown_collection_returns_404(tmp_path: Path, monkeypatch):
     response = client.post("/vision/collections/aaaaaaaaaaaa/analyze", json={}, headers=_headers())
 
     assert response.status_code == 404
+
+
+def test_collection_image_detail_and_artifacts_are_reachable(tmp_path: Path, monkeypatch):
+    """The per-image detail view (Phase: expose ZIP collections in the UI)
+    needs a real, per-image report + signed artifact URLs -- collection
+    images are analyzed directly via FieldTriageProcessor, not through the
+    JobManager, so they have no JobStore-backed run_id and need their own
+    route (see api/main.py's _safe_collection_image_artifact_path)."""
+    client = _client(tmp_path, monkeypatch)
+    zip_bytes = _make_zip({"a/img1.jpg": _synthetic_jpeg_bytes(0.3)})
+
+    upload = client.post(
+        "/vision/collections", files={"file": ("photos.zip", zip_bytes, "application/zip")}, headers=_headers()
+    ).json()
+    collection_id = upload["collectionId"]
+
+    analysis = client.post(f"/vision/collections/{collection_id}/analyze", json={}, headers=_headers()).json()
+    image_result = analysis["imageResults"][0]
+    assert image_result["status"] == "analyzed"
+    image_id = image_result["imageId"]
+
+    detail_resp = client.get(f"/vision/collections/{collection_id}/images/{image_id}", headers=_headers())
+    assert detail_resp.status_code == 200
+    detail = detail_resp.json()
+    assert detail["runId"]
+    assert "source" not in detail or "path" not in (detail.get("source") or {})
+    assert "heatmap.png" in detail["artifactUrls"]
+
+    artifact_url = detail["artifactUrls"]["heatmap.png"]
+    path_and_query = artifact_url.split(str(client.base_url), 1)[-1]
+    artifact_resp = client.get(path_and_query)
+    assert artifact_resp.status_code == 200
+    assert artifact_resp.headers["content-type"].startswith("image/")
+
+
+def test_collection_image_detail_requires_auth(tmp_path: Path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+
+    response = client.get("/vision/collections/aaaaaaaaaaaa/images/bbbbbbbbbbbb")
+
+    assert response.status_code == 401
+
+
+def test_collection_image_detail_404_before_analysis(tmp_path: Path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    zip_bytes = _make_zip({"img1.jpg": _synthetic_jpeg_bytes(0.3)})
+    upload = client.post(
+        "/vision/collections", files={"file": ("photos.zip", zip_bytes, "application/zip")}, headers=_headers()
+    ).json()
+
+    response = client.get(
+        f"/vision/collections/{upload['collectionId']}/images/aaaaaaaaaaaa", headers=_headers()
+    )
+
+    assert response.status_code == 404
+
+
+def test_collection_image_artifact_rejects_wrong_token(tmp_path: Path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    zip_bytes = _make_zip({"img1.jpg": _synthetic_jpeg_bytes(0.3)})
+    upload = client.post(
+        "/vision/collections", files={"file": ("photos.zip", zip_bytes, "application/zip")}, headers=_headers()
+    ).json()
+    collection_id = upload["collectionId"]
+    analysis = client.post(f"/vision/collections/{collection_id}/analyze", json={}, headers=_headers()).json()
+    image_id = analysis["imageResults"][0]["imageId"]
+
+    response = client.get(
+        f"/vision/collections/{collection_id}/images/{image_id}/artifacts/heatmap.png?token=not-a-real-token"
+    )
+
+    assert response.status_code == 401
+
+
+def test_collection_image_artifact_rejects_path_traversal(tmp_path: Path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    zip_bytes = _make_zip({"img1.jpg": _synthetic_jpeg_bytes(0.3)})
+    upload = client.post(
+        "/vision/collections", files={"file": ("photos.zip", zip_bytes, "application/zip")}, headers=_headers()
+    ).json()
+    collection_id = upload["collectionId"]
+    analysis = client.post(f"/vision/collections/{collection_id}/analyze", json={}, headers=_headers()).json()
+    image_id = analysis["imageResults"][0]["imageId"]
+    detail = client.get(f"/vision/collections/{collection_id}/images/{image_id}", headers=_headers()).json()
+    token = detail["artifactUrls"]["heatmap.png"].split("token=", 1)[-1]
+
+    response = client.get(
+        f"/vision/collections/{collection_id}/images/{image_id}/artifacts/../../../etc/passwd?token={token}"
+    )
+
+    assert response.status_code in (400, 401, 404)
