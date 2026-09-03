@@ -252,7 +252,7 @@ function pct(n: number | undefined) {
           <button
             type="button"
             class="btn btn-ghost btn-sm"
-            :disabled="!count"
+            :disabled="count <= 1"
             :aria-label="playing ? 'Pause replay' : 'Play replay'"
             @click="togglePlay"
           >

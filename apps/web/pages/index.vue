@@ -128,6 +128,22 @@ async function refreshRecent() {
 
 const report = computed(() => job.value?.report as FieldTriageReport | null | undefined)
 
+// A single uploaded photo is internally repeated a few times so the
+// temporal-persistence math (which needs >=3 observations) can still form
+// Inspection Areas — see apps/vision/cropmerge/video/decoder.py's own
+// comment. That's real, load-bearing backend behavior, not a bug to
+// remove; the actual bug was the UI presenting those duplicate copies as
+// if they were distinct video frames ("3 frames @ 1 FPS" for one photo).
+// Detected from report.source.frameCount (always 1 for a real still
+// image, regardless of upload mode), not the transient `file` ref, so it
+// still works when reopening a past run from Recent/Demo.
+const isSingleImageReport = computed(() => (report.value?.source?.frameCount ?? 0) <= 1)
+
+const displayFrameQuality = computed(() => {
+  const frames = report.value?.frameQuality || []
+  return isSingleImageReport.value ? frames.slice(0, 1) : frames
+})
+
 const zones = computed(() => report.value?.inspectionZones ?? [])
 
 const { brief: fieldBrief, loadingLines } = useFieldBrief(report, zones)
@@ -906,7 +922,8 @@ const mediaSrc = computed(() => {
           </h1>
           <p class="muted" style="margin: 0.25rem 0 0">
             {{ report.source.width }}×{{ report.source.height }}
-            · {{ report.analysis.framesSampled }} frames @ {{ report.analysis.sampleFps }} FPS
+            · <template v-if="isSingleImageReport">1 photo</template>
+            <template v-else>{{ report.analysis.framesSampled }} frames @ {{ report.analysis.sampleFps }} FPS</template>
             · {{ report.analysis.totalRuntimeSec.toFixed(1) }}s
             · <span class="mono">{{ report.runId }}</span>
           </p>
@@ -1041,8 +1058,8 @@ const mediaSrc = computed(() => {
                 role="tab"
                 @click="scrollToFrames"
               >
-                All frames
-                <span v-if="report.analysis.framesSampled" class="tab-count">
+                {{ isSingleImageReport ? 'Photo' : 'All frames' }}
+                <span v-if="!isSingleImageReport && report.analysis.framesSampled" class="tab-count">
                   {{ report.analysis.framesSampled }}
                 </span>
               </button>
@@ -1084,7 +1101,8 @@ const mediaSrc = computed(() => {
             />
             <div v-else-if="mediaTab === 'frames'" class="frames-tab-hint">
               <p class="muted" style="margin: 0 0 0.75rem">
-                {{ report.analysis.framesSampled }} sampled frames with overlays and quality scores.
+                <template v-if="isSingleImageReport">This photo's overlay and quality score.</template>
+                <template v-else>{{ report.analysis.framesSampled }} sampled frames with overlays and quality scores.</template>
               </p>
               <button type="button" class="btn btn-primary btn-sm" @click="scrollToFrames">
                 Open frame review
@@ -1100,7 +1118,7 @@ const mediaSrc = computed(() => {
               Snapshot quilt from the flight — good for spotting row patterns at a glance
             </template>
             <template v-else-if="mediaTab === 'frames'">
-              Full per-frame strip is below — every sample the engine scored
+              {{ isSingleImageReport ? 'Your uploaded photo, with its overlay and quality score.' : 'Full per-frame strip is below — every sample the engine scored' }}
             </template>
             <template v-else>
               {{ report.mapLabel }}
@@ -1194,9 +1212,9 @@ const mediaSrc = computed(() => {
         <FrameReview
           v-if="report.runId"
           :run-id="report.runId"
-          :frames="report.frameQuality || []"
+          :frames="displayFrameQuality"
           :artifact-urls="job?.artifactUrls || {}"
-          :frames-sampled="report.analysis.framesSampled"
+          :frames-sampled="isSingleImageReport ? 1 : report.analysis.framesSampled"
           :focus-timestamp-sec="selectedZone?.firstSeenSec ?? null"
         />
       </div>
