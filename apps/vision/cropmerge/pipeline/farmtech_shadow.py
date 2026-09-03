@@ -21,10 +21,13 @@ import logging
 
 import numpy as np
 
+from cropmerge.features.inter_row_vegetation import analyze_inter_row_vegetation
+from cropmerge.features.management_units import segment_management_units, unit_footprint_mask
 from cropmerge.features.observability import classify_observability
 from cropmerge.features.residue_detection import classify_residue_evidence
 from cropmerge.features.rgb_indices import excess_green, vari
 from cropmerge.features.row_geometry import RowGeometryConfig, analyze_row_geometry
+from cropmerge.features.unit_row_geometry import analyze_management_unit_rows
 from cropmerge.features.weed_pressure import understory_vegetation_fraction
 from cropmerge.pipeline.schemas import (
     FarmTechObservation,
@@ -37,6 +40,50 @@ from cropmerge.pipeline.schemas import (
 log = logging.getLogger("cropmerge.pipeline.farmtech_shadow")
 
 _MIN_ROW_GEOMETRY_MASK_PIXELS = 100
+
+
+def _compute_visible_inter_row_vegetation(
+    bgr: np.ndarray,
+    field: np.ndarray,
+    crop_mask: np.ndarray | None,
+    label_map: np.ndarray | None,
+) -> float | None:
+    """Area-weighted mean of analyze_inter_row_vegetation() across every
+    confident ACTIVE_CROP management unit this frame. Returns None (never
+    fabricated) when label_map/crop_mask are unavailable, no unit reaches
+    confident row geometry, or anything here fails -- isolated in its own
+    try/except so a failure here degrades only this one optional field,
+    never the rest of the FarmTech shadow observation."""
+    if label_map is None or crop_mask is None:
+        return None
+    try:
+        seg = segment_management_units(bgr, field, label_map)
+        row_results = {
+            r.unit_id: r.row_geometry
+            for r in analyze_management_unit_rows(crop_mask, field, seg)
+            if r.row_geometry is not None
+        }
+        if not row_results:
+            return None
+
+        weighted_sum = 0.0
+        weight_total = 0
+        for unit in seg.units:
+            geometry = row_results.get(unit.unit_id)
+            if geometry is None:
+                continue
+            unit_mask = unit_footprint_mask(field, seg, unit.unit_id)
+            result = analyze_inter_row_vegetation(bgr, unit_mask, geometry)
+            if result is None:
+                continue
+            area = int(np.count_nonzero(unit_mask))
+            weighted_sum += result.visible_inter_row_vegetation_fraction_of_unit * area
+            weight_total += area
+
+        return weighted_sum / weight_total if weight_total > 0 else None
+    except Exception:
+        log.exception("Visible inter-row vegetation computation failed (non-fatal, skipping)")
+        return None
 
 
 def compute_farmtech_observation(
@@ -88,6 +135,8 @@ def compute_farmtech_observation(
                 residue_classification = residue.classification.value
                 residue_note = residue.confidence_note
 
+        visible_inter_row_fraction = _compute_visible_inter_row_vegetation(bgr, field, crop_mask, label_map)
+
         structure = FarmTechStructure(
             crop_occupancy=crop_occupancy,
             soil_fraction=soil_fraction,
@@ -96,6 +145,7 @@ def compute_farmtech_observation(
             vegetated_soil_fraction_of_field=vegetated_soil_of_field,
             residue_classification=residue_classification,
             residue_confidence_note=residue_note,
+            visible_inter_row_vegetation_fraction=visible_inter_row_fraction,
         )
 
         row_geometry: FarmTechRowGeometry | None = None

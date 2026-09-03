@@ -176,6 +176,13 @@ class FarmTechStructure(BaseModel):
     # | None (no BARE_SOIL area to evaluate this observation).
     residue_classification: str | None = None
     residue_confidence_note: str | None = None
+    # Row-aware inter-row vegetation, computed per confident ACTIVE_CROP
+    # management unit and area-weighted across units into one frame value —
+    # see cropmerge/features/inter_row_vegetation.py's module docstring for
+    # why this is geometrically real ("between the detected crop rows") and
+    # NOT to be called "weed density": zero species/weed-vs-volunteer-crop
+    # discrimination. None when no confident row geometry exists this frame.
+    visible_inter_row_vegetation_fraction: float | None = None
 
 
 class FarmTechObservation(BaseModel):
@@ -321,6 +328,7 @@ def farm_tech_to_camel_dict(ft: FarmTechObservation | None) -> dict[str, Any] | 
             "vegetatedSoilFractionOfField": ft.structure.vegetated_soil_fraction_of_field,
             "residueClassification": ft.structure.residue_classification,
             "residueConfidenceNote": ft.structure.residue_confidence_note,
+            "visibleInterRowVegetationFraction": ft.structure.visible_inter_row_vegetation_fraction,
         },
     }
 

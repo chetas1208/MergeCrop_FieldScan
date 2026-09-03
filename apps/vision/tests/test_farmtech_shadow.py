@@ -66,6 +66,58 @@ def test_compute_farmtech_observation_never_raises_on_bad_input():
     assert compute_farmtech_observation(bgr, field, None, 0.0, None, None) is None
 
 
+def _crop_row_stripe_field(h: int = 240, w: int = 120, n_stripes: int = 4, stripe_half_width: int = 5):
+    """Vertical crop-row stripes over a soil background -- enough real row
+    structure for unit_row_geometry to reach confident ACTIVE_CROP geometry
+    (see tests/test_inter_row_vegetation.py, same fixture shape)."""
+    margin = 10
+    usable = w - 2 * margin
+    spacing = usable / n_stripes
+    bgr = np.zeros((h, w, 3), dtype=np.uint8)
+    bgr[:] = (90, 140, 180)
+    crop_mask = np.zeros((h, w), dtype=bool)
+    for i in range(n_stripes):
+        cx = int(margin + spacing * i + spacing / 2)
+        x0, x1 = max(0, cx - stripe_half_width), min(w, cx + stripe_half_width)
+        bgr[margin : h - margin, x0:x1] = (30, 170, 30)
+        crop_mask[margin : h - margin, x0:x1] = True
+    field = np.ones((h, w), dtype=bool)
+    label = np.full((h, w), "CROP", dtype=object)
+    return bgr, field, label, crop_mask
+
+
+def test_visible_inter_row_vegetation_populated_with_confident_row_geometry():
+    bgr, field, label, crop_mask = _crop_row_stripe_field()
+
+    result = compute_farmtech_observation(bgr, field, crop_mask, 0.0, None, None, label_map=label)
+
+    assert result is not None
+    assert result.structure.visible_inter_row_vegetation_fraction is not None
+    assert 0.0 <= result.structure.visible_inter_row_vegetation_fraction <= 1.0
+
+
+def test_visible_inter_row_vegetation_none_without_crop_mask():
+    bgr, field, label, _crop_mask = _crop_row_stripe_field()
+
+    result = compute_farmtech_observation(bgr, field, None, 0.0, None, None, label_map=label)
+
+    assert result is not None
+    assert result.structure.visible_inter_row_vegetation_fraction is None
+
+
+def test_visible_inter_row_vegetation_none_without_confident_row_geometry():
+    # Uniform bare soil -- no crop rows anywhere, no confident geometry.
+    bgr = np.full((50, 50, 3), (90, 140, 180), dtype=np.uint8)
+    field = np.ones((50, 50), dtype=bool)
+    label = np.full((50, 50), "BARE_SOIL", dtype=object)
+    crop_mask = np.zeros((50, 50), dtype=bool)
+
+    result = compute_farmtech_observation(bgr, field, crop_mask, 1.0, None, None, label_map=label)
+
+    assert result is not None
+    assert result.structure.visible_inter_row_vegetation_fraction is None
+
+
 def _run_synthetic_field(tmp_path: Path, monkeypatch, shadow_enabled: bool):
     from scripts.generate_demo_video import make_frame
 

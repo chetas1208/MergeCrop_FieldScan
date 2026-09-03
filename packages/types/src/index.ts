@@ -138,6 +138,12 @@ export interface FarmTechStructure {
    * classifier. Null when there was no soil-classified area to evaluate. */
   residueClassification?: 'living_vegetation' | 'likely_residue' | 'likely_bare_soil' | 'unknown' | null
   residueConfidenceNote?: string | null
+  /** Row-aware vegetation fraction measured specifically BETWEEN detected
+   * crop rows (perpendicular distance to the nearest row line), area-
+   * weighted across confident ACTIVE_CROP management units. NOT "weed
+   * density" — zero species/weed-vs-volunteer-crop discrimination. Null
+   * when no confident row geometry exists for this observation. */
+  visibleInterRowVegetationFraction?: number | null
 }
 
 /** Shadow-only per-observation FarmTech evidence — recorded for review, not
