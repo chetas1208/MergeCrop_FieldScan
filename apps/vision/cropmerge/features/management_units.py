@@ -379,3 +379,26 @@ def segment_management_units(
         )
 
     return UnitSegmentationResult(rows=rows, cols=cols, cell_unit_ids=cell_unit_ids, units=units)
+
+
+def unit_footprint_mask(
+    field_mask: np.ndarray,
+    result: UnitSegmentationResult,
+    unit_id: int,
+) -> np.ndarray:
+    """Boolean, image-resolution mask of a unit's FULL footprint (every
+    field pixel inside a cell belonging to `unit_id`), not just its
+    crop-labelled pixels -- unlike unit_row_geometry._unit_crop_mask, which
+    deliberately restricts to crop-plant pixels for row detection, this is
+    the general-purpose "what area does this unit cover" mask needed by
+    e.g. inter-row vegetation classification (which needs the unit's soil/
+    inter-row space too, not just its crop pixels)."""
+    h, w = field_mask.shape[:2]
+    cells = build_grid(h, w, result.rows, result.cols)
+    mask = np.zeros(field_mask.shape[:2], dtype=bool)
+    for cell in cells:
+        if result.cell_unit_ids[cell.row][cell.col] != unit_id:
+            continue
+        region = mask[cell.y0 : cell.y1, cell.x0 : cell.x1]
+        region |= field_mask[cell.y0 : cell.y1, cell.x0 : cell.x1].astype(bool)
+    return mask
