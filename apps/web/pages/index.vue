@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import type { AnalysisJob, FieldTriageReport, InspectionZone, VisionHealth } from '@cropmerge/types'
+import CollectionResults from '~/components/CollectionResults.vue'
+import { useCollections } from '~/composables/useCollections'
+import type { CollectionAnalysisResult } from '~/composables/useCollections'
 import {
   FIELD_COPY,
   estimatedCropCoverage,
@@ -45,7 +48,10 @@ const annotatedVideoEl = ref<HTMLVideoElement | null>(null)
 const uploadProgress = ref<number | null>(null)
 const activeUploadId = ref<string | null>(null)
 const abortController = ref<AbortController | null>(null)
+const collectionId = ref<string | null>(null)
+const collectionAnalysis = ref<CollectionAnalysisResult | null>(null)
 const { request } = useVisionApi()
+const { uploadCollection, analyzeCollection } = useCollections()
 const {
   isDemo,
   demoCases,
@@ -127,6 +133,7 @@ const zones = computed(() => report.value?.inspectionZones ?? [])
 const { brief: fieldBrief, loadingLines } = useFieldBrief(report, zones)
 
 const loadingCaption = computed(() => {
+  if (isZipUpload.value) return 'Uploading and analyzing every photo in the collection…'
   if (uploadProgress.value != null && uploadProgress.value < 1) {
     return `Uploading directly to the vision server · ${Math.round(uploadProgress.value * 100)}%`
   }
@@ -214,7 +221,8 @@ function formatWhen(iso: string) {
 
 const VIDEO_EXTS = ['.mp4', '.mov', '.m4v']
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.bmp']
-const ALLOWED_EXTS = [...VIDEO_EXTS, ...IMAGE_EXTS]
+const COLLECTION_EXTS = ['.zip']
+const ALLOWED_EXTS = [...VIDEO_EXTS, ...IMAGE_EXTS, ...COLLECTION_EXTS]
 
 function extOf(name: string) {
   const i = name.lastIndexOf('.')
@@ -222,7 +230,12 @@ function extOf(name: string) {
 }
 
 function isAllowedFile(f: File) {
-  return ALLOWED_EXTS.includes(extOf(f.name)) || f.type.startsWith('video/') || f.type.startsWith('image/')
+  return (
+    ALLOWED_EXTS.includes(extOf(f.name))
+    || f.type.startsWith('video/')
+    || f.type.startsWith('image/')
+    || f.type === 'application/zip'
+  )
 }
 
 const isImageUpload = computed(() => {
@@ -231,9 +244,14 @@ const isImageUpload = computed(() => {
   return IMAGE_EXTS.includes(ext) || file.value.type.startsWith('image/')
 })
 
+const isZipUpload = computed(() => {
+  if (!file.value) return false
+  return COLLECTION_EXTS.includes(extOf(file.value.name)) || file.value.type === 'application/zip'
+})
+
 function setFile(f: File | null) {
   if (f && !isAllowedFile(f)) {
-    error.value = 'Use video (.mp4 .mov .m4v) or image (.jpg .png .webp .bmp).'
+    error.value = 'Use video (.mp4 .mov .m4v), image (.jpg .png .webp .bmp), or a .zip photo collection.'
     return
   }
   file.value = f
@@ -439,7 +457,7 @@ async function analyze() {
     return
   }
   if (!file.value) {
-    error.value = 'Choose a drone video or field image first.'
+    error.value = 'Choose a drone video, field image, or .zip photo collection first.'
     return
   }
   if (!visionOnline.value) {
@@ -449,6 +467,10 @@ async function analyze() {
   }
   if (gpuBusy.value && (health.value?.vision?.queueDepth ?? 0) >= (health.value?.vision?.maxQueueDepth ?? 3)) {
     error.value = gpuStatusMessage.value || 'GPU queue is full. Try again in a few minutes.'
+    return
+  }
+  if (isZipUpload.value) {
+    await runCollectionAnalysis()
     return
   }
   loading.value = true
@@ -493,6 +515,29 @@ async function analyze() {
   }
 }
 
+async function runCollectionAnalysis() {
+  if (!file.value) return
+  loading.value = true
+  error.value = ''
+  collectionAnalysis.value = null
+  collectionId.value = null
+  try {
+    const uploaded = await uploadCollection(file.value)
+    collectionId.value = uploaded.collectionId
+    if (uploaded.summary.validImages === 0) {
+      throw new Error('No usable images found in this .zip — check that it contains .jpg/.png photos.')
+    }
+    collectionAnalysis.value = await analyzeCollection(uploaded.collectionId, {
+      segmentationBackend: health.value?.vision?.segmentationBackend || 'heuristic',
+      dinoBackend: health.value?.vision?.dinoBackend || 'heuristic',
+    })
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    loading.value = false
+  }
+}
+
 async function openRecent(id: string) {
   error.value = ''
   loading.value = true
@@ -534,6 +579,8 @@ function reset() {
   selectedDemoId.value = null
   demoResult.value = false
   error.value = ''
+  collectionAnalysis.value = null
+  collectionId.value = null
   if (fileInput.value) fileInput.value.value = ''
 }
 
@@ -560,8 +607,22 @@ const mediaSrc = computed(() => {
 
 <template>
   <div class="stack stack-lg">
+    <!-- Photo collection (.zip) results -->
+    <template v-if="collectionAnalysis && collectionId">
+      <div class="row row-between">
+        <div>
+          <p class="section-label" style="margin-bottom: 0.35rem">Photo collection analysis</p>
+          <h1 class="page-title" style="font-size: clamp(1.4rem, 2.5vw, 1.85rem)">
+            {{ file?.name || 'Collection' }}
+          </h1>
+        </div>
+        <button type="button" class="btn btn-ghost" @click="reset">New analysis</button>
+      </div>
+      <CollectionResults :collection-id="collectionId" :analysis="collectionAnalysis" />
+    </template>
+
     <!-- Empty / upload state -->
-    <template v-if="!report && !loading">
+    <template v-else-if="!report && !loading">
       <div class="row row-between">
         <div>
           <p class="section-label" style="margin-bottom: 0.35rem">Flight review</p>
@@ -624,20 +685,21 @@ const mediaSrc = computed(() => {
             ref="fileInput"
             type="file"
             class="sr-only"
-            accept=".mp4,.mov,.m4v,.jpg,.jpeg,.png,.webp,.bmp,video/*,image/*"
+            accept=".mp4,.mov,.m4v,.jpg,.jpeg,.png,.webp,.bmp,.zip,video/*,image/*,application/zip"
             @change="onFileInput"
             @click.stop
           />
           <div class="upload-icon" aria-hidden="true">↑</div>
-          <h2 class="upload-title">Drop field video or image here</h2>
+          <h2 class="upload-title">Drop field video, image, or photo collection here</h2>
           <p class="upload-meta">
-            Video .mp4 · .mov · .m4v · Image .jpg · .png · .webp · 1 FPS sample
+            Video .mp4 · .mov · .m4v · Image .jpg · .png · .webp · or a .zip photo collection · 1 FPS sample
           </p>
 
           <div v-if="file && !isDemo" class="file-chip" @click.stop>
             <span>{{ file.name }}</span>
             <span class="muted">{{ formatBytes(file.size) }}</span>
             <span v-if="isImageUpload" class="muted">image</span>
+            <span v-else-if="isZipUpload" class="muted">photo collection</span>
           </div>
           <div v-else-if="isDemo && selectedDemoId" class="file-chip" @click.stop>
             <span>{{ demoCases.find((d) => d.id === selectedDemoId)?.title }}</span>
@@ -651,7 +713,7 @@ const mediaSrc = computed(() => {
               :disabled="!canAnalyze || loading"
               @click="analyze"
             >
-              {{ isDemo ? 'View demo analysis' : 'Analyze field' }}
+              {{ isDemo ? 'View demo analysis' : isZipUpload ? 'Upload & analyze collection' : 'Analyze field' }}
             </button>
             <button v-if="!isDemo" type="button" class="btn btn-ghost" @click="openFilePicker">
               Browse files
