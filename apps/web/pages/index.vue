@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { AnalysisJob, FieldTriageReport, InspectionZone, VisionHealth } from '@cropmerge/types'
 import CollectionResults from '~/components/CollectionResults.vue'
+import ZoneMicroCrop from '~/components/ZoneMicroCrop.vue'
 import { useCollections } from '~/composables/useCollections'
 import type { CollectionAnalysisResult } from '~/composables/useCollections'
 import {
@@ -215,6 +216,30 @@ function pct(n: number | undefined) {
 
 function artifactUrl(name: string) {
   return job.value?.artifactUrls?.[name] || ''
+}
+
+function padFrame(i: number) {
+  return String(i).padStart(4, '0')
+}
+
+// Granular anomaly highlighting: the nearest sampled frame's overlay image
+// to a zone's firstSeenSec, so the zone-detail micro-crop shows real
+// imagery (with the engine's own segmentation/continuity annotation) at
+// the exact moment the anomaly was first observed, not just a generic
+// whole-run heatmap.
+function nearestOverlayUrlForZone(zone: InspectionZone | null): string {
+  if (!zone || !report.value?.frameQuality?.length) return ''
+  const target = zone.firstSeenSec ?? 0
+  let best = report.value.frameQuality[0]
+  let bestDist = Math.abs(best.timestampSec - target)
+  for (const f of report.value.frameQuality) {
+    const d = Math.abs(f.timestampSec - target)
+    if (d < bestDist) {
+      best = f
+      bestDist = d
+    }
+  }
+  return artifactUrl(`overlays/overlay_${padFrame(best.frameIndex)}.jpg`)
 }
 
 function formatBytes(n: number) {
@@ -1157,6 +1182,25 @@ const mediaSrc = computed(() => {
               · {{ formatObservations(selectedZone) }}
             </template>
           </p>
+
+          <div class="micro-crop-row">
+            <div>
+              <p class="section-label" style="margin-bottom: 0.4rem; font-size: 0.72rem">Flagged region — imagery</p>
+              <ZoneMicroCrop
+                :image-url="nearestOverlayUrlForZone(selectedZone)"
+                :bbox="selectedZone.bboxNorm"
+                alt="Zoomed view of the flagged region on the source imagery"
+              />
+            </div>
+            <div>
+              <p class="section-label" style="margin-bottom: 0.4rem; font-size: 0.72rem">Flagged region — variation map</p>
+              <ZoneMicroCrop
+                :image-url="artifactUrl('heatmap.png')"
+                :bbox="selectedZone.bboxNorm"
+                alt="Zoomed view of the flagged region on the variation heatmap"
+              />
+            </div>
+          </div>
 
           <h3 class="section-label" style="margin-top: 0.5rem">Why it was flagged</h3>
           <ul>

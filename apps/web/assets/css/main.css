@@ -780,6 +780,18 @@ select {
   color: var(--text-soft);
 }
 
+.micro-crop-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+@media (max-width: 520px) {
+  .micro-crop-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .tech-dl {
   display: grid;
   grid-template-columns: auto 1fr;
