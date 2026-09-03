@@ -408,10 +408,22 @@ def score_structural_cells(
 
         soil_delta = max(0.0, bare - float(cell.features.get("bare_soil", 0.0)))
 
+        # Same real-field regression as classify_zone_type's occ_deficit
+        # gate above (see that comment for the full trace): a real stand
+        # gap removes crop, so it shows up in BOTH the along-row profile
+        # AND the cell's own local occupancy. A single noisy 1D sample
+        # crossing ordinary canopy texture (no real occupancy deficit)
+        # must not carry full weight in the SCORE either, not just the
+        # label -- otherwise the same false positives still rank as
+        # HIGH-priority findings under a different name. `continuity`/
+        # `gap_extent` stay stored on the cell at their raw value (still
+        # useful diagnostic signal for explain_zone's reasons), only their
+        # contribution to this cell's score is corroboration-scaled.
+        corroboration = float(np.clip(occ_deficit / 0.15, 0.0, 1.0))
         score = (
             w_occ * np.clip(occ_deficit, 0, 1)
-            + w_cont * continuity
-            + w_gap * np.clip(gap_extent, 0, 1)
+            + w_cont * continuity * corroboration
+            + w_gap * np.clip(gap_extent, 0, 1) * corroboration
             + w_frag * np.clip(frag_val * 3, 0, 1)
             + w_soil * np.clip(soil_delta * 2, 0, 1)
         ) / max(wsum, 1e-6)
@@ -487,9 +499,24 @@ def _raw_zone_type(cell: GridCell, row_visibility: str) -> str:
     if struct < 0.25 and appear < 0.25:
         return "general_visual_variation"
 
-    if continuity >= 0.45 and row_visibility in {"HIGH", "MEDIUM"}:
+    # Real-field regression (2026-09-03, traced from real user report of
+    # "identical-looking regions flagged in some spots but not others" on a
+    # healthy, uniform soybean field): _sample_along_row()'s single 1D
+    # profile through a cell can dip through ordinary within-canopy texture
+    # (leaf clumping, shadow) and read as a near-perfect "gap" even when the
+    # cell's own 2D occupancy is completely normal -- verified directly on
+    # samples/real/real_soybean_field.jpg: 15 of 38 valid cells scored
+    # continuity>=0.63 (several at 1.0) while their occ_deficit sat at
+    # 0.0-0.12, scattered essentially at random depending on exactly where
+    # the sampling line crossed a natural micro-dip. A genuine stand gap
+    # removes crop, so it shows up in BOTH the along-row profile AND the
+    # cell's own local occupancy -- requiring occ_deficit corroboration
+    # (thresholds match explain.py's own existing "worth mentioning"
+    # deficit bar) cut that same field's stand-gap-eligible cells from 15
+    # to 1, keeping the one with a real, substantial 23% occupancy deficit.
+    if continuity >= 0.45 and row_visibility in {"HIGH", "MEDIUM"} and occ_def >= 0.15:
         return "stand_gap"
-    if continuity >= 0.30 and row_visibility in {"HIGH", "MEDIUM"}:
+    if continuity >= 0.30 and row_visibility in {"HIGH", "MEDIUM"} and occ_def >= 0.08:
         return "row_discontinuity"
     if bare >= 0.25 and occ_def >= 0.2 and struct >= 0.25:
         return "stand_gap"

@@ -9,6 +9,7 @@ row-structured crop block.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from cropmerge.anomaly.grid import build_grid
 from cropmerge.anomaly.structural import score_structural_cells
@@ -121,7 +122,18 @@ def test_unit_row_angle_recovers_gap_continuity_the_whole_frame_angle_misses():
     assert gap_without.features["continuity_evidence"] == 0.0
     assert gap_without.features["gap_length_score"] == 0.0
 
-    # With the unit's own confident angle, the same real gap is detected.
+    # With the unit's own confident angle, the same real gap is detected in
+    # the raw along-row signal.
     assert gap_with.features["continuity_evidence"] > 0.9
     assert gap_with.features["gap_length_score"] > 0.9
-    assert gap_with.structural_anomaly_score > gap_without.structural_anomaly_score
+
+    # This particular synthetic gap is narrow relative to the coarse grid
+    # cell (a coarse-grid resolution artifact of this fixture, not a real
+    # occupancy deficit at the whole-cell level -- see structural.py's own
+    # 2026-09-03 comment on why continuity/gap must be occupancy-
+    # corroborated before they're allowed to raise the SCORE, traced from a
+    # real false-positive-flagging report on an actual healthy soybean
+    # field). So structural_anomaly_score correctly does NOT jump here even
+    # though the raw continuity/gap signal was recovered above -- that's
+    # the intended, more conservative behavior post-fix, not a regression.
+    assert gap_with.features["row_occupancy_deficit"] == pytest.approx(0.0, abs=1e-6)
